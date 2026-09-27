@@ -1,0 +1,79 @@
+package com.xiaomanjun.sleepdownschedule.feature.home
+
+import com.xiaomanjun.sleepdownschedule.app.ui.*
+import com.xiaomanjun.sleepdownschedule.*
+
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
+
+/** Explicit appearance edits may refresh a frozen scene without replacing its course inputs. */
+internal fun AppState.withPersonalizationConfig(candidate: ScheduleConfigEntity?): AppState =
+    if (candidate != null && candidate.id == config.id && candidate != config) {
+        copy(config = candidate)
+    } else {
+        this
+    }
+
+/**
+ * Lightweight, transient values used while a personalization slider is being dragged.
+ *
+ * These values intentionally do not form a ScheduleConfigEntity. Consumers subscribe only to
+ * the property they draw, so a pointer sample cannot invalidate the complete HomeScreen tree.
+ */
+@Stable
+internal class PersonalizationPreviewState {
+    var wallpaperBlur by mutableStateOf<Float?>(null)
+        private set
+    var wallpaperBrightness by mutableStateOf<Float?>(null)
+        private set
+    var cardAlpha by mutableStateOf<Float?>(null)
+        private set
+    var cardBlur by mutableStateOf<Float?>(null)
+        private set
+    var cardRefractionStrength by mutableStateOf<Float?>(null)
+        private set
+    var cardFontScale by mutableStateOf<Float?>(null)
+        private set
+    var weekCardCornerProgress by mutableStateOf<Float?>(null)
+        private set
+
+    fun update(key: String, candidate: ScheduleConfigEntity) {
+        when (key) {
+            PersonalizeWallpaperBlurSlider -> wallpaperBlur = candidate.wallpaperBlur
+            PersonalizeWallpaperBrightnessSlider -> wallpaperBrightness = candidate.wallpaperBrightness
+            PersonalizeCardAlphaSlider -> cardAlpha = candidate.cardAlpha
+            PersonalizeCardBlurSlider -> cardBlur = candidate.courseCardBlur
+            PersonalizeCardRefractionSlider -> cardRefractionStrength = candidate.courseCardRefractionStrength
+            PersonalizeCardFontSlider -> cardFontScale = candidate.courseCardFontScale
+            PersonalizeWeekCornerSlider -> weekCardCornerProgress = candidate.weekCardCornerProgress
+        }
+    }
+
+    fun clear(key: String) {
+        when (key) {
+            PersonalizeWallpaperBlurSlider -> wallpaperBlur = null
+            PersonalizeWallpaperBrightnessSlider -> wallpaperBrightness = null
+            PersonalizeCardAlphaSlider -> cardAlpha = null
+            PersonalizeCardBlurSlider -> cardBlur = null
+            PersonalizeCardRefractionSlider -> cardRefractionStrength = null
+            PersonalizeCardFontSlider -> cardFontScale = null
+            PersonalizeWeekCornerSlider -> weekCardCornerProgress = null
+        }
+    }
+
+    fun clearAll() {
+        wallpaperBlur = null
+        wallpaperBrightness = null
+        cardAlpha = null
+        cardBlur = null
+        cardRefractionStrength = null
+        cardFontScale = null
+        weekCardCornerProgress = null
+    }
+}
+
+internal val LocalPersonalizationPreview =
+    staticCompositionLocalOf<PersonalizationPreviewState?> { null }

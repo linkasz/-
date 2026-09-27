@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:description="@string/widget_today_courses_square_description"
+    android:initialLayout="@layout/widget_today_courses_square"
+    android:minWidth="@dimen/widget_square_min_width"
+    android:minHeight="@dimen/widget_square_min_height"
+    android:previewImage="@drawable/widget_picker_preview_courses_square"
+    android:previewLayout="@layout/widget_preview_today_courses_square"
+    android:resizeMode="none"
+    android:targetCellWidth="2"
+    android:targetCellHeight="2"
+    android:updatePeriodMillis="1800000"
+    android:widgetCategory="home_screen"
+    tools:targetApi="s" />

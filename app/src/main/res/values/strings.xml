@@ -1,0 +1,53 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <string name="app_name">课表+</string>
+    <string name="backup_open_with_label">课表+ 恢复</string>
+    <string name="todo_share_label">提取待办到课表+</string>
+    <string name="widget_today_courses_description">今日课程安排</string>
+    <string name="widget_today_courses_name">今日课程</string>
+    <string name="widget_today_courses_square_description">今日课程（2×2）</string>
+    <string name="widget_today_courses_square_name">今日课程</string>
+    <string name="widget_today_tomorrow_name">今明课程</string>
+    <string name="widget_today_tomorrow_description">同时显示今天与明天的课程安排</string>
+    <string name="widget_week_schedule_name">周视图课程表</string>
+    <string name="widget_week_schedule_description">可拉伸的本周课程表</string>
+    <string name="widget_today_assistant_name">AI助理</string>
+    <string name="widget_today_assistant_description">AI助理实时课程、天气与预警</string>
+    <string name="widget_todo_tasks_name">今日待办</string>
+    <string name="widget_todo_tasks_description">查看并快速打开近期待办事项</string>
+    <string name="widget_todo_tasks_empty">当前没有待办</string>
+    <string name="widget_todo_complete">完成待办：%1$s</string>
+    <string name="widget_refresh_symbol">&#x21BB;</string>
+    <string name="widget_refresh_description">刷新课程</string>
+    <string name="widget_preview_next_course">下节课</string>
+    <string name="widget_preview_materials_chemistry">材料化学</string>
+    <string name="widget_preview_countdown">68 分钟后</string>
+    <string name="widget_preview_location" tools:ignore="TypographyDashes">北区 | J8&#45;0302</string>
+    <string name="widget_preview_today_count">今天有 1 节课</string>
+    <string name="widget_preview_weather">☀️ 25°C 晴</string>
+    <string name="widget_preview_assistant_hint">点击卡片和助手对话</string>
+    <string name="widget_preview_tomorrow_friday">明日课程 · 周五</string>
+    <string name="widget_preview_week_three">第3周</string>
+    <string name="widget_preview_morning_time">10:05\n11:40</string>
+    <string name="widget_preview_materials_detail" tools:ignore="TypographyDashes">材料化学\n第3&#45;4节 | 北区 J8&#45;0302</string>
+    <string name="widget_preview_afternoon_time">14:30\n16:05</string>
+    <string name="widget_preview_signal_detail" tools:ignore="TypographyDashes">数字信号处理\n第7&#45;8节 | 南区 B0203</string>
+    <string name="widget_preview_tomorrow">明日课程</string>
+    <string name="widget_preview_animation_detail">动漫鉴赏\n10:00 · A-105</string>
+    <string name="widget_preview_japanese_detail">日语入门\n14:00 · B-208</string>
+    <string name="widget_preview_schedule_name">大二上</string>
+    <string name="widget_preview_today_label">今天 · 周四</string>
+    <string name="widget_preview_tomorrow_label">明天 · 周五</string>
+    <string name="widget_preview_data_visualization">数据可视化\n13:30 · 中心教学楼</string>
+    <string name="widget_preview_software_lab">软件工程实验\n20:30 · 实验室 11</string>
+    <string name="widget_preview_drone_lab">无人机技术实验\n13:30 · 实验室 12</string>
+    <string name="widget_preview_week_title">第4周 · 周视图</string>
+    <string name="widget_preview_week_range">3.23–3.29</string>
+    <string name="widget_preview_weekdays">一　　二　　三　　四　　五</string>
+    <string name="widget_preview_advanced_math">高等数学</string>
+    <string name="widget_preview_software_engineering">软件工程</string>
+    <string name="widget_preview_data_visualization_name">数据可视化</string>
+    <string name="widget_preview_college_english">大学英语</string>
+    <string name="widget_preview_laboratory_course">实验课程</string>
+    <string name="widget_today_empty">今天没有课</string>
+    <string name="widget_tomorrow_empty">明天没有课</string>
+</resources>

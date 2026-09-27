@@ -1,0 +1,83 @@
+diff --git a/miuix-ui/src/commonMain/kotlin/top/yukonga/miuix/kmp/basic/Scaffold.kt b/miuix-ui/src/commonMain/kotlin/top/yukonga/miuix/kmp/basic/Scaffold.kt
+index aff644d..9ba948b 100644
+--- a/miuix-ui/src/commonMain/kotlin/top/yukonga/miuix/kmp/basic/Scaffold.kt
++++ b/miuix-ui/src/commonMain/kotlin/top/yukonga/miuix/kmp/basic/Scaffold.kt
+@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.calculateStartPadding
+ import androidx.compose.foundation.layout.consumeWindowInsets
+ import androidx.compose.foundation.layout.displayCutout
+ import androidx.compose.foundation.layout.exclude
++import androidx.compose.foundation.layout.fillMaxSize
+ import androidx.compose.foundation.layout.onConsumedWindowInsetsChanged
+ import androidx.compose.foundation.layout.padding
+ import androidx.compose.foundation.layout.systemBars
+@@ -52,6 +53,9 @@ import top.yukonga.miuix.kmp.utils.MiuixPopupUtils.Companion.MiuixPopupHost
+  * To show a [Snackbar], use [SnackbarHostState.showSnackbar].
+  *
+  * @param modifier the [Modifier] to be applied to this scaffold.
++ * @param underlayModifier modifier applied only to the page layers below the popup host. This is
++ * useful for backdrop producers: popup/dialog consumers stay a sibling and can never sample an
++ * ancestor that structurally contains themselves.
+  * @param topBar top app bar of the screen.
+  * @param bottomBar bottom bar of the screen.
+  * @param floatingActionButton floating action button of the screen.
+@@ -77,6 +81,7 @@ import top.yukonga.miuix.kmp.utils.MiuixPopupUtils.Companion.MiuixPopupHost
+ @Composable
+ fun Scaffold(
+     modifier: Modifier = Modifier,
++    underlayModifier: Modifier = Modifier,
+     topBar: @Composable () -> Unit = {},
+     bottomBar: @Composable () -> Unit = {},
+     floatingActionButton: @Composable () -> Unit = {},
+@@ -109,18 +114,24 @@ fun Scaffold(
+             LocalRootDialogStates provides rootDialogStates,
+             LocalRootPopupStates provides rootPopupStates,
+         ) {
+-            ScaffoldLayout(
+-                topBar = topBar,
+-                bottomBar = bottomBar,
+-                content = content,
+-                snackbar = snackbarHost,
+-                floatingActionButton = floatingActionButton,
+-                floatingActionButtonPosition = floatingActionButtonPosition,
+-                floatingToolbar = floatingToolbar,
+-                floatingToolbarPosition = floatingToolbarPosition,
+-                popup = popupHost,
+-                contentWindowInsets = safeInsets,
+-            )
++            Box(Modifier.fillMaxSize()) {
++                ScaffoldLayout(
++                    modifier = underlayModifier,
++                    topBar = topBar,
++                    bottomBar = bottomBar,
++                    content = content,
++                    snackbar = snackbarHost,
++                    floatingActionButton = floatingActionButton,
++                    floatingActionButtonPosition = floatingActionButtonPosition,
++                    floatingToolbar = floatingToolbar,
++                    floatingToolbarPosition = floatingToolbarPosition,
++                    popup = {},
++                    contentWindowInsets = safeInsets,
++                )
++                // The host deliberately lives outside the underlay subtree. A dialog may sample
++                // the complete page producer without creating a RenderNode producer/consumer loop.
++                Box(Modifier.fillMaxSize()) { popupHost() }
++            }
+         }
+     }
+ }
+@@ -143,6 +154,7 @@ fun Scaffold(
+  */
+ @Composable
+ private fun ScaffoldLayout(
++    modifier: Modifier,
+     topBar: @Composable () -> Unit,
+     snackbar: @Composable () -> Unit,
+     bottomBar: @Composable () -> Unit,
+@@ -179,6 +191,6 @@ private fun ScaffoldLayout(
+     val floatingToolbarContent: @Composable () -> Unit = remember(floatingToolbar) { { Box { floatingToolbar() } } }
+     val bodyContent: @Composable () -> Unit = remember(content, contentPadding) { { Box { content(contentPadding) } } }
+     val bottomBarContent: @Composable () -> Unit = remember(bottomBar) { { Box { bottomBar() } } }
+-    SubcomposeLayout { constraints ->
++    SubcomposeLayout(modifier = modifier) { constraints ->
+         val layoutWidth = constraints.maxWidth
+         val layoutHeight = constraints.maxHeight

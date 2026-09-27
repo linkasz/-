@@ -1,0 +1,179 @@
+<resources>
+    <style name="AppThemeBase" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowBackground">#FFEDEEF3</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+    </style>
+
+    <style name="AppTheme" parent="@style/AppThemeBase" />
+
+    <style name="AppTheme.TranslucentMorph" parent="@style/AppTheme">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:windowDisablePreview">true</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+
+    <!-- Opaque detail theme for ColorOS ViewSeamless destinations. ViewSeamless requires an
+         opaque destination window (a transparent one makes OplusViewSeamlessRemoteManager log
+         `skip anim`). Glass for these pages is provided by the page content itself, not by a
+         translucent window. -->
+    <style name="AppTheme.OplusSeamlessDetail" parent="@style/AppTheme">
+        <item name="android:windowIsTranslucent">false</item>
+        <item name="android:windowBackground">#FFEDEEF3</item>
+        <item name="android:windowDisablePreview">false</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+
+    <style name="WidgetCourseRowFrame">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">54dp</item>
+        <item name="android:background">@drawable/widget_course_background</item>
+    </style>
+
+    <style name="WidgetCourseRowContent">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">match_parent</item>
+        <item name="android:gravity">center_vertical</item>
+        <item name="android:orientation">horizontal</item>
+        <item name="android:paddingLeft">10dp</item>
+        <item name="android:paddingTop">4dp</item>
+        <item name="android:paddingRight">10dp</item>
+        <item name="android:paddingBottom">4dp</item>
+    </style>
+
+    <style name="WidgetCourseTimeColumn">
+        <item name="android:layout_width">58dp</item>
+        <item name="android:layout_height">match_parent</item>
+        <item name="android:gravity">center_vertical</item>
+        <item name="android:orientation">vertical</item>
+    </style>
+
+    <style name="WidgetCourseTimePrimary">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_weight">0</item>
+        <item name="android:gravity">center_vertical</item>
+        <item name="android:includeFontPadding">true</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:textColor">#AA111111</item>
+        <item name="android:textSize">13sp</item>
+    </style>
+
+    <style name="WidgetCourseTimeSecondary" parent="WidgetCourseTimePrimary">
+        <item name="android:textColor">#66111111</item>
+    </style>
+
+    <style name="WidgetCourseIndicator">
+        <item name="android:layout_width">5dp</item>
+        <item name="android:layout_height">24dp</item>
+        <item name="android:layout_marginLeft">5dp</item>
+        <item name="android:layout_marginRight">10dp</item>
+        <item name="android:src">@drawable/widget_course_indicator</item>
+    </style>
+
+    <style name="WidgetCourseInfoColumn">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">match_parent</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:gravity">center_vertical</item>
+        <item name="android:orientation">vertical</item>
+    </style>
+
+    <style name="WidgetCourseName">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_weight">0</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:gravity">center_vertical</item>
+        <item name="android:includeFontPadding">true</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:textColor">#FF111111</item>
+        <item name="android:textSize">15sp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="WidgetCourseDetail">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_weight">0</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:gravity">center_vertical</item>
+        <item name="android:includeFontPadding">true</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:textColor">#66111111</item>
+        <item name="android:textSize">11sp</item>
+    </style>
+
+    <style name="WidgetCompactCourseRowFrame">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">50dp</item>
+        <item name="android:background">@drawable/widget_course_background_compact</item>
+    </style>
+
+    <style name="WidgetCompactCourseRowContent">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">match_parent</item>
+        <item name="android:gravity">center_vertical</item>
+        <item name="android:orientation">horizontal</item>
+        <item name="android:paddingLeft">7dp</item>
+        <item name="android:paddingTop">4dp</item>
+        <item name="android:paddingRight">7dp</item>
+        <item name="android:paddingBottom">4dp</item>
+    </style>
+
+    <style name="WidgetCompactIndicator">
+        <item name="android:layout_width">4dp</item>
+        <item name="android:layout_height">24dp</item>
+        <item name="android:layout_marginRight">7dp</item>
+        <item name="android:src">@drawable/widget_course_indicator</item>
+    </style>
+
+    <style name="WidgetCourseGridCellFrame">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">match_parent</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:background">@drawable/widget_course_background_compact</item>
+    </style>
+
+    <style name="WidgetCourseGridCellContent">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">match_parent</item>
+        <item name="android:gravity">center_vertical</item>
+        <item name="android:orientation">horizontal</item>
+        <item name="android:paddingLeft">7dp</item>
+        <item name="android:paddingTop">4dp</item>
+        <item name="android:paddingRight">7dp</item>
+        <item name="android:paddingBottom">4dp</item>
+    </style>
+
+    <style name="WidgetTodayTomorrowCourseRowFrame">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">43dp</item>
+        <item name="android:background">@drawable/widget_course_background_compact</item>
+    </style>
+
+    <style name="WidgetTodayTomorrowCourseRowContent">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">match_parent</item>
+        <item name="android:gravity">center_vertical</item>
+        <item name="android:orientation">horizontal</item>
+        <item name="android:paddingLeft">7dp</item>
+        <item name="android:paddingTop">3dp</item>
+        <item name="android:paddingRight">7dp</item>
+        <item name="android:paddingBottom">3dp</item>
+    </style>
+
+    <style name="WidgetCompactCourseName" parent="WidgetCourseName">
+        <item name="android:textSize">12sp</item>
+    </style>
+
+    <style name="WidgetCompactCourseDetail" parent="WidgetCourseDetail">
+        <item name="android:textSize">9.5sp</item>
+    </style>
+</resources>

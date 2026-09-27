@@ -1,0 +1,631 @@
+package com.xiaomanjun.sleepdownschedule.core.wallpaper
+
+import com.xiaomanjun.sleepdownschedule.glass.ui.*
+
+import com.xiaomanjun.sleepdownschedule.*
+
+import android.content.Context
+import android.content.Intent
+import android.graphics.Bitmap
+import androidx.core.graphics.createBitmap
+import androidx.core.graphics.scale
+import androidx.core.net.toUri
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.net.Uri
+import android.os.Build
+import android.media.MediaMetadataRetriever
+import androidx.palette.graphics.Palette
+import java.io.File
+import java.io.FileOutputStream
+import java.net.URI
+import java.util.Locale
+import java.util.UUID
+import kotlin.math.max
+import kotlin.math.roundToInt
+
+const val WallpaperBlurMaxDp = 12f
+private const val WallpaperDirectoryName = "wallpaper"
+private const val StoredWallpaperQuality = 88
+
+fun wallpaperBlurPercent(blurDp: Float): Float =
+    blurDp.coerceIn(0f, WallpaperBlurMaxDp) / WallpaperBlurMaxDp * 100f
+
+fun wallpaperBlurDp(percent: Float): Float =
+    percent.coerceIn(0f, 100f) / 100f * WallpaperBlurMaxDp
+
+fun extractRepresentativeWallpaperColors(bitmap: Bitmap?): List<Long> {
+    if (bitmap == null || bitmap.width <= 0 || bitmap.height <= 0) return DefaultCourseCardPalette
+    val palette = runCatching {
+        Palette.from(bitmap)
+            .maximumColorCount(12)
+            .resizeBitmapArea(96 * 96)
+            .generate()
+    }.getOrNull() ?: return DefaultCourseCardPalette
+    return curateWallpaperCoursePalette(
+        palette.swatches.map { swatch ->
+            (swatch.rgb.toLong() and 0xFFFFFFFFL) to swatch.population
+        }
+    )
+}
+
+/**
+ * Palette target swatches are useful for accents, but ordering vibrant/dark targets before real
+ * population made a tiny shadow or accessory steer several course cards. Keep populous colours,
+ * reject low-population hue outliers, and let the assignment stage create nearby variations.
+ */
+internal fun curateWallpaperCoursePalette(
+    weightedColors: List<Pair<Long, Int>>
+): List<Long> {
+    if (weightedColors.isEmpty()) return DefaultCourseCardPalette
+    val ordered = weightedColors
+        .filter { it.second > 0 }
+        .sortedByDescending { it.second }
+    if (ordered.isEmpty()) return DefaultCourseCardPalette
+    val maximumPopulation = ordered.first().second.coerceAtLeast(1)
+    fun hsv(color: Long): FloatArray = FloatArray(3).also {
+        android.graphics.Color.colorToHSV(color.toInt(), it)
+    }
+    fun hueDistance(first: Float, second: Float): Float {
+        val raw = kotlin.math.abs(first - second) % 360f
+        return minOf(raw, 360f - raw)
+    }
+    val dominantHsv = hsv(ordered.first().first)
+    val ranked = ordered
+        .asSequence()
+        .map { (color, population) ->
+            val colorHsv = hsv(color)
+            val populationRatio = population.toFloat() / maximumPopulation
+            val distance = hueDistance(dominantHsv[0], colorHsv[0])
+            Triple(color, colorHsv, populationRatio to distance)
+        }
+        .filter { (_, colorHsv, score) ->
+            val (populationRatio, distance) = score
+            colorHsv[2] >= 0.22f &&
+                populationRatio >= 0.035f &&
+                (
+                    dominantHsv[1] < 0.16f ||
+                        colorHsv[1] < 0.14f ||
+                        populationRatio >= 0.18f ||
+                        distance <= 70f
+                    )
+        }
+        .sortedByDescending { (_, colorHsv, score) ->
+            val (populationRatio, distance) = score
+            val familyScore = if (dominantHsv[1] < 0.16f || colorHsv[1] < 0.14f) {
+                0.5f
+            } else {
+                1f - distance / 180f
+            }
+            populationRatio * 0.82f + familyScore * 0.18f
+        }
+        .map { it.first }
+        .toList()
+    val distinct = mutableListOf<Long>()
+    ranked.forEach { color ->
+        if (distinct.all { courseCardPerceptualDistance(it, color) >= 0.045 }) {
+            distinct += color
+        }
+    }
+    return distinct.take(6).ifEmpty { listOf(ordered.first().first) }
+}
+
+data class WallpaperSourceSize(val width: Int, val height: Int)
+
+data class LoadedWallpaperSource(
+    val bitmap: Bitmap?,
+    val sourceSize: WallpaperSourceSize?
+)
+
+enum class WallpaperMediaKind { IMAGE, ANIMATED_IMAGE, VIDEO }
+
+fun wallpaperMediaKind(context: Context, uri: Uri): WallpaperMediaKind {
+    val mime = runCatching { context.contentResolver.getType(uri) }.getOrNull()?.lowercase(Locale.ROOT).orEmpty()
+    val extension = uri.lastPathSegment.orEmpty().substringAfterLast('.', "").lowercase(Locale.ROOT)
+    return when {
+        mime.startsWith("video/") || extension in setOf("mp4", "m4v", "mov", "3gp", "webm", "mkv") -> WallpaperMediaKind.VIDEO
+        mime == "image/gif" || extension in setOf("gif", "webp") -> WallpaperMediaKind.ANIMATED_IMAGE
+        else -> WallpaperMediaKind.IMAGE
+    }
+}
+
+fun persistWallpaperUriPermission(context: Context, uri: Uri) {
+    runCatching {
+        context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+}
+
+fun persistWallpaperSource(context: Context, uri: Uri): Uri? {
+    if (uri.scheme == "file") {
+        val file = resolveManagedWallpaperFile(context.filesDir, uri.toString())
+        if (file?.isFile == true && file.parentFile?.canonicalFile == wallpaperDirectory(context).canonicalFile) {
+            return Uri.fromFile(file)
+        }
+    }
+    persistWallpaperUriPermission(context, uri)
+    when (wallpaperMediaKind(context, uri)) {
+        WallpaperMediaKind.VIDEO -> return persistManagedWallpaperMedia(context, uri, videoExtension(context, uri))
+        WallpaperMediaKind.ANIMATED_IMAGE -> return persistManagedWallpaperMedia(context, uri, mediaExtension(context, uri))
+        WallpaperMediaKind.IMAGE -> extractMotionPhotoVideo(context, uri)?.let { return it }
+    }
+    return persistManagedWallpaperImage(
+        context = context,
+        uri = uri,
+        directoryName = WallpaperDirectoryName,
+        filePrefix = "source_wallpaper",
+        maxDimension = 2600
+    )
+}
+
+private fun mediaExtension(context: Context, uri: Uri): String {
+    val mime = runCatching { context.contentResolver.getType(uri) }.getOrNull()?.lowercase(Locale.ROOT)
+    val known = when (mime) {
+        "image/gif" -> "gif"
+        "image/webp" -> "webp"
+        else -> null
+    }
+    val pathExtension = uri.lastPathSegment.orEmpty().substringAfterLast('.', "").lowercase(Locale.ROOT)
+    return known ?: pathExtension.takeIf { it in setOf("gif", "webp") } ?: "webp"
+}
+
+private fun videoExtension(context: Context, uri: Uri): String {
+    val mime = runCatching { context.contentResolver.getType(uri) }.getOrNull()?.lowercase(Locale.ROOT)
+    val known = when (mime) {
+        "video/quicktime" -> "mov"
+        "video/webm" -> "webm"
+        "video/3gpp", "video/3gpp2" -> "3gp"
+        "video/x-matroska" -> "mkv"
+        else -> "mp4"
+    }
+    val pathExtension = uri.lastPathSegment.orEmpty().substringAfterLast('.', "").lowercase(Locale.ROOT)
+    return pathExtension.takeIf { it in setOf("mp4", "m4v", "mov", "3gp", "webm", "mkv") } ?: known
+}
+
+private fun persistManagedWallpaperMedia(context: Context, uri: Uri, extension: String): Uri? {
+    val directory = wallpaperDirectory(context).apply { mkdirs() }
+    val output = File(directory, "source_wallpaper_${UUID.randomUUID()}.$extension")
+    val temporary = File(directory, "${output.name}.tmp")
+    return runCatching {
+        openWallpaperInputStream(context, uri)?.use { input ->
+            FileOutputStream(temporary).use { destination ->
+                input.copyTo(destination, bufferSize = 64 * 1024)
+                destination.fd.sync()
+            }
+        } ?: error("壁纸资源不可读取")
+        if (!temporary.renameTo(output)) {
+            temporary.copyTo(output, overwrite = true)
+            temporary.delete()
+        }
+        Uri.fromFile(output)
+    }.getOrElse {
+        temporary.delete()
+        output.delete()
+        null
+    }
+}
+
+private fun extractMotionPhotoVideo(context: Context, uri: Uri): Uri? {
+    val mime = runCatching { context.contentResolver.getType(uri) }.getOrNull()?.lowercase(Locale.ROOT).orEmpty()
+    val extension = uri.lastPathSegment.orEmpty().substringAfterLast('.', "").lowercase(Locale.ROOT)
+    if (mime !in setOf("image/jpeg", "image/heic", "image/heif") && extension !in setOf("jpg", "jpeg", "heic", "heif")) {
+        return null
+    }
+    val header = runCatching {
+        openWallpaperInputStream(context, uri)?.use { input ->
+            val output = java.io.ByteArrayOutputStream(64 * 1024)
+            val buffer = ByteArray(16 * 1024)
+            while (output.size() < 512 * 1024) {
+                val count = input.read(buffer, 0, minOf(buffer.size, 512 * 1024 - output.size()))
+                if (count <= 0) break
+                output.write(buffer, 0, count)
+            }
+            String(output.toByteArray(), Charsets.UTF_8)
+        }
+    }.getOrNull() ?: return null
+    val videoLength = Regex("""(?i)(?:MicroVideoOffset|MotionPhotoOffset|motionPhotoLength)\s*=\s*[\"']?(\d+)""")
+        .find(header)?.groupValues?.getOrNull(1)?.toLongOrNull()?.takeIf { it > 0L } ?: return null
+
+    val directory = wallpaperDirectory(context).apply { mkdirs() }
+    val candidate = File(directory, "motion_candidate_${UUID.randomUUID()}.$extension")
+    val video = File(directory, "source_wallpaper_${UUID.randomUUID()}.mp4")
+    return runCatching {
+        openWallpaperInputStream(context, uri)?.use { input -> candidate.outputStream().use { input.copyTo(it, 64 * 1024) } }
+            ?: error("实况照片不可读取")
+        val start = candidate.length() - videoLength
+        require(start >= 0L && videoLength >= 8_192L) { "实况照片视频段无效" }
+        java.io.RandomAccessFile(candidate, "r").use { source ->
+            source.seek(start)
+            FileOutputStream(video).use { destination ->
+                val buffer = ByteArray(64 * 1024)
+                while (true) {
+                    val count = source.read(buffer)
+                    if (count < 0) break
+                    destination.write(buffer, 0, count)
+                }
+                destination.fd.sync()
+            }
+        }
+        val metadata = readVideoSourceSize(video.absolutePath)
+        require(metadata != null) { "实况照片视频无法解码" }
+        Uri.fromFile(video)
+    }.getOrNull().also {
+        candidate.delete()
+        if (it == null) video.delete()
+    }
+}
+
+internal fun persistManagedWallpaperImage(
+    context: Context,
+    uri: Uri,
+    directoryName: String,
+    filePrefix: String,
+    maxDimension: Int
+): Uri? {
+    val bitmap = loadSampledBitmap(context, uri, maxDimension) ?: return null
+    return persistManagedWallpaperBitmap(context, bitmap, directoryName, filePrefix).also {
+        bitmap.recycle()
+    }
+}
+
+internal fun persistManagedWallpaperBitmap(
+    context: Context,
+    bitmap: Bitmap,
+    directoryName: String,
+    filePrefix: String
+): Uri? {
+    val directory = File(context.filesDir, directoryName).apply { mkdirs() }
+    val output = File(directory, "${filePrefix}_${UUID.randomUUID()}.webp")
+    val temporary = File(directory, "${output.name}.tmp")
+    return runCatching {
+        temporary.outputStream().buffered().use { stream ->
+            check(compressStoredWallpaper(bitmap, stream)) { "壁纸压缩失败" }
+        }
+        if (!temporary.renameTo(output)) {
+            temporary.copyTo(output, overwrite = true)
+            temporary.delete()
+        }
+        Uri.fromFile(output)
+    }.getOrElse {
+        temporary.delete()
+        output.delete()
+        null
+    }
+}
+
+@Suppress("DEPRECATION")
+private fun compressStoredWallpaper(bitmap: Bitmap, output: java.io.OutputStream): Boolean {
+    val format = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        Bitmap.CompressFormat.WEBP_LOSSY
+    } else {
+        Bitmap.CompressFormat.WEBP
+    }
+    return bitmap.compress(format, StoredWallpaperQuality, output)
+}
+
+internal fun unreferencedScheduleWallpaperUris(
+    referencedUris: Collection<String>,
+    candidateUris: Collection<String>
+): Set<String> {
+    val referenced = referencedUris.filterTo(linkedSetOf()) { it.isNotBlank() }
+    return candidateUris.filterTo(linkedSetOf()) { it !in referenced }
+}
+
+internal fun unreferencedWallpaperFiles(
+    referencedUris: Collection<String>,
+    candidateFiles: Collection<File>,
+    canonicalize: (File) -> String = { it.canonicalPath }
+): Set<File> {
+    val referencedPaths = referencedUris.mapNotNullTo(linkedSetOf()) { uriString ->
+        val uri = runCatching { URI(uriString) }.getOrNull()
+        if (uri?.scheme != "file") null else uri.path?.let { path ->
+            runCatching { canonicalize(File(path)) }.getOrNull()
+        }
+    }
+    // Android private storage prefixes can change after restore. Preserve the same managed
+    // filename even when the old absolute path no longer canonicalizes to the current prefix.
+    val managedNames = referencedUris.mapNotNullTo(linkedSetOf(), ::managedWallpaperFileName)
+    return candidateFiles.filterTo(linkedSetOf()) { file ->
+        val path = runCatching { canonicalize(file) }.getOrNull()
+        path != null && path !in referencedPaths && file.name !in managedNames
+    }
+}
+
+private fun managedWallpaperFileName(value: String): String? {
+    val uri = runCatching { URI(value) }.getOrNull() ?: return null
+    if (uri.scheme != "file") return null
+    val path = uri.path ?: return null
+    val name = path.substringAfter("/files/wallpaper/", "")
+    return name.takeIf { it.isNotBlank() && '/' !in it && '\\' !in it && it != "." && it != ".." }
+}
+
+internal fun resolveManagedWallpaperFile(filesDir: File, value: String): File? {
+    val uri = runCatching { URI(value) }.getOrNull() ?: return null
+    if (uri.scheme != "file") return null
+    val original = uri.path?.let(::File) ?: return null
+    if (original.isFile) return original
+    val name = managedWallpaperFileName(value) ?: return original
+    return File(File(filesDir, WallpaperDirectoryName), name).takeIf(File::isFile) ?: original
+}
+
+internal fun wallpaperFileReadyForCleanup(file: File, now: Long): Boolean =
+    file.lastModified() > 0 && now - file.lastModified() >= 24 * 60 * 60 * 1000L
+
+fun cleanupUnreferencedScheduleWallpapers(context: Context, referencedUris: Collection<String>) {
+    val wallpaperDir = wallpaperDirectory(context)
+    // A newly prepared wallpaper may still be waiting for its configuration write. Startup,
+    // restore and debounced personalization saves must not delete those in-flight files.
+    val now = System.currentTimeMillis()
+    val files = wallpaperDir.listFiles().orEmpty().filter { it.isFile && wallpaperFileReadyForCleanup(it, now) }
+    unreferencedWallpaperFiles(referencedUris, files).forEach { file ->
+        runCatching { file.delete() }
+    }
+}
+
+private fun wallpaperDirectory(context: Context): File = File(context.filesDir, WallpaperDirectoryName)
+
+fun loadWallpaperBitmap(context: Context, config: ScheduleConfigEntity, useDarkDefaultWallpaper: Boolean): Bitmap? {
+    val customUri = config.wallpaperUri
+    if (!customUri.isNullOrBlank()) {
+        loadSampledBitmap(context, customUri.toUri(), maxDimension = 2600)?.let { return it }
+    }
+    return null
+}
+
+fun loadSampledBitmap(context: Context, uri: Uri, maxDimension: Int = 2200): Bitmap? {
+    return loadWallpaperSource(context, uri, maxDimension).bitmap
+}
+
+fun loadWallpaperSource(
+    context: Context,
+    uri: Uri,
+    maxDimension: Int = 2200
+): LoadedWallpaperSource {
+    if (wallpaperMediaKind(context, uri) == WallpaperMediaKind.VIDEO) {
+        val video = readVideoSource(context, uri, maxDimension)
+        return LoadedWallpaperSource(bitmap = video?.first, sourceSize = video?.second)
+    }
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    runCatching {
+        openWallpaperInputStream(context, uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+    }
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+        return LoadedWallpaperSource(bitmap = null, sourceSize = null)
+    }
+    val sourceSize = WallpaperSourceSize(bounds.outWidth, bounds.outHeight)
+    val sampleSize = calculateInSampleSize(bounds.outWidth, bounds.outHeight, maxDimension)
+    val options = BitmapFactory.Options().apply {
+        inSampleSize = sampleSize
+        inPreferredConfig = Bitmap.Config.ARGB_8888
+    }
+    val bitmap = runCatching {
+        openWallpaperInputStream(context, uri)?.use { BitmapFactory.decodeStream(it, null, options) }
+    }.getOrNull()
+    return LoadedWallpaperSource(bitmap = bitmap, sourceSize = sourceSize)
+}
+
+fun createReducedWallpaperBitmap(source: Bitmap?): Bitmap? {
+    if (source == null || source.width <= 0 || source.height <= 0) return null
+    val largest = max(source.width, source.height).coerceAtLeast(1)
+    val maxReducedDimension = 900
+    val scale = (maxReducedDimension.toFloat() / largest).coerceAtMost(1f)
+    if (scale >= 0.999f) return source
+    val width = (source.width * scale).roundToInt().coerceAtLeast(1)
+    val height = (source.height * scale).roundToInt().coerceAtLeast(1)
+    return source.scale(width, height)
+}
+
+/**
+ * Small, always software-backed copy used only for regional text contrast checks.
+ * Keeping this separate from the render bitmap avoids reading hardware bitmaps on
+ * the main thread and makes the handful of per-label samples effectively free.
+ */
+fun createWallpaperReadabilityBitmap(source: Bitmap?): Bitmap? {
+    if (source == null || source.width <= 0 || source.height <= 0) return null
+    val largest = max(source.width, source.height).coerceAtLeast(1)
+    // At 128px a small timeline label covered only one source row, losing local light/dark edges.
+    val scale = (512f / largest).coerceAtMost(1f)
+    val width = (source.width * scale).roundToInt().coerceAtLeast(1)
+    val height = (source.height * scale).roundToInt().coerceAtLeast(1)
+    return createBitmap(width, height).also { target ->
+        Canvas(target).drawBitmap(source, null, android.graphics.Rect(0, 0, width, height), null)
+    }
+}
+
+fun createBlurredWallpaperBitmap(source: Bitmap?, blurRadius: Int): Bitmap? {
+    if (source == null || blurRadius <= 0 || source.width <= 0 || source.height <= 0) return null
+    val largest = max(source.width, source.height).coerceAtLeast(1)
+    val maxBlurDimension = 900
+    val scale = (maxBlurDimension.toFloat() / largest).coerceAtMost(1f)
+    val width = (source.width * scale).roundToInt().coerceAtLeast(1)
+    val height = (source.height * scale).roundToInt().coerceAtLeast(1)
+    val working = createBitmap(width, height)
+    Canvas(working).drawBitmap(source, null, android.graphics.Rect(0, 0, width, height), null)
+    return runCatching {
+        boxBlurBitmap(working, (blurRadius * scale).roundToInt().coerceIn(2, 18))
+    }.getOrElse {
+        working
+    }
+}
+
+private fun boxBlurBitmap(bitmap: Bitmap, radius: Int): Bitmap {
+    val width = bitmap.width
+    val height = bitmap.height
+    if (width <= 1 || height <= 1 || radius <= 0) return bitmap
+    var pixels = IntArray(width * height)
+    var scratch = IntArray(width * height)
+    bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
+    repeat(3) {
+        boxBlurHorizontal(pixels, scratch, width, height, radius)
+        boxBlurVertical(scratch, pixels, width, height, radius)
+    }
+    bitmap.setPixels(pixels, 0, width, 0, 0, width, height)
+    return bitmap
+}
+
+private fun boxBlurHorizontal(input: IntArray, output: IntArray, width: Int, height: Int, radius: Int) {
+    val window = radius * 2 + 1
+    for (y in 0 until height) {
+        val row = y * width
+        var a = 0
+        var r = 0
+        var g = 0
+        var b = 0
+        for (i in -radius..radius) {
+            val color = input[row + i.coerceIn(0, width - 1)]
+            a += color ushr 24
+            r += color shr 16 and 0xFF
+            g += color shr 8 and 0xFF
+            b += color and 0xFF
+        }
+        for (x in 0 until width) {
+            output[row + x] =
+                (a / window shl 24) or
+                    (r / window shl 16) or
+                    (g / window shl 8) or
+                    (b / window)
+            val removeX = (x - radius).coerceIn(0, width - 1)
+            val addX = (x + radius + 1).coerceIn(0, width - 1)
+            val remove = input[row + removeX]
+            val add = input[row + addX]
+            a += (add ushr 24) - (remove ushr 24)
+            r += (add shr 16 and 0xFF) - (remove shr 16 and 0xFF)
+            g += (add shr 8 and 0xFF) - (remove shr 8 and 0xFF)
+            b += (add and 0xFF) - (remove and 0xFF)
+        }
+    }
+}
+
+private fun boxBlurVertical(input: IntArray, output: IntArray, width: Int, height: Int, radius: Int) {
+    val window = radius * 2 + 1
+    for (x in 0 until width) {
+        var a = 0
+        var r = 0
+        var g = 0
+        var b = 0
+        for (i in -radius..radius) {
+            val color = input[i.coerceIn(0, height - 1) * width + x]
+            a += color ushr 24
+            r += color shr 16 and 0xFF
+            g += color shr 8 and 0xFF
+            b += color and 0xFF
+        }
+        for (y in 0 until height) {
+            output[y * width + x] =
+                (a / window shl 24) or
+                    (r / window shl 16) or
+                    (g / window shl 8) or
+                    (b / window)
+            val removeY = (y - radius).coerceIn(0, height - 1)
+            val addY = (y + radius + 1).coerceIn(0, height - 1)
+            val remove = input[removeY * width + x]
+            val add = input[addY * width + x]
+            a += (add ushr 24) - (remove ushr 24)
+            r += (add shr 16 and 0xFF) - (remove shr 16 and 0xFF)
+            g += (add shr 8 and 0xFF) - (remove shr 8 and 0xFF)
+            b += (add and 0xFF) - (remove and 0xFF)
+        }
+    }
+}
+
+fun readWallpaperSourceSize(context: Context, uri: Uri): WallpaperSourceSize? {
+    if (wallpaperMediaKind(context, uri) == WallpaperMediaKind.VIDEO) {
+        return readVideoSource(context, uri, maxDimension = 512)?.second
+    }
+    val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    runCatching {
+        openWallpaperInputStream(context, uri)?.use { BitmapFactory.decodeStream(it, null, options) }
+    }
+    return if (options.outWidth > 0 && options.outHeight > 0) {
+        WallpaperSourceSize(options.outWidth, options.outHeight)
+    } else {
+        null
+    }
+}
+
+private fun readVideoSource(context: Context, uri: Uri, maxDimension: Int): Pair<Bitmap?, WallpaperSourceSize>? {
+    val retriever = MediaMetadataRetriever()
+    return try {
+        if (uri.scheme == "file") {
+            val file = resolveManagedWallpaperFile(context.filesDir, uri.toString()) ?: return null
+            retriever.setDataSource(file.absolutePath)
+        } else {
+            retriever.setDataSource(context, uri)
+        }
+        val rawWidth = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: return null
+        val rawHeight = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: return null
+        val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+        val sourceSize = if (rotation % 180 != 0) WallpaperSourceSize(rawHeight, rawWidth) else WallpaperSourceSize(rawWidth, rawHeight)
+        val sampleScale = (maxDimension.toFloat() / max(rawWidth, rawHeight).coerceAtLeast(1)).coerceAtMost(1f)
+        val frame = runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                retriever.getScaledFrameAtTime(
+                    100_000L,
+                    MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+                    (rawWidth * sampleScale).toInt().coerceAtLeast(1),
+                    (rawHeight * sampleScale).toInt().coerceAtLeast(1)
+                ) ?: retriever.getScaledFrameAtTime(
+                    0L,
+                    MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+                    (rawWidth * sampleScale).toInt().coerceAtLeast(1),
+                    (rawHeight * sampleScale).toInt().coerceAtLeast(1)
+                )
+            } else {
+                retriever.getFrameAtTime(100_000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                    ?: retriever.getFrameAtTime(0L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+            }
+        }.getOrNull() ?: return null
+        val sampleSize = calculateInSampleSize(frame.width, frame.height, maxDimension)
+        val bitmap = if (sampleSize > 1) {
+            Bitmap.createScaledBitmap(frame, (frame.width / sampleSize).coerceAtLeast(1), (frame.height / sampleSize).coerceAtLeast(1), true)
+                .also { if (it !== frame) frame.recycle() }
+        } else frame
+        bitmap to sourceSize
+    } catch (_: Exception) {
+        null
+    } finally {
+        runCatching { retriever.release() }
+    }
+}
+
+private fun readVideoSourceSize(path: String): WallpaperSourceSize? {
+    val retriever = MediaMetadataRetriever()
+    return try {
+        retriever.setDataSource(path)
+        val width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: return null
+        val height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: return null
+        val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+        if (rotation % 180 != 0) WallpaperSourceSize(height, width) else WallpaperSourceSize(width, height)
+    } catch (_: Exception) {
+        null
+    } finally {
+        runCatching { retriever.release() }
+    }
+}
+
+private fun openWallpaperInputStream(context: Context, uri: Uri) =
+    if (uri.scheme == "file") {
+        resolveManagedWallpaperFile(context.filesDir, uri.toString())?.inputStream()
+    } else {
+        context.contentResolver.openInputStream(uri)
+    }
+
+fun wallpaperPrefersLightText(context: Context, uri: String?): Boolean {
+    if (uri.isNullOrBlank()) return false
+    val bitmap = loadSampledBitmap(context, uri.toUri(), maxDimension = 720) ?: return false
+    val palette = runCatching { Palette.from(bitmap).generate() }.getOrNull()
+    val color = palette?.getDominantColor(android.graphics.Color.WHITE) ?: android.graphics.Color.WHITE
+    val red = android.graphics.Color.red(color) / 255.0
+    val green = android.graphics.Color.green(color) / 255.0
+    val blue = android.graphics.Color.blue(color) / 255.0
+    val luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue
+    return luminance < 0.56
+}
+
+private fun calculateInSampleSize(width: Int, height: Int, maxDimension: Int): Int {
+    var sampleSize = 1
+    val largest = max(width, height)
+    while (largest / sampleSize > maxDimension.coerceAtLeast(256)) {
+        sampleSize *= 2
+    }
+    return sampleSize.coerceAtLeast(1)
+}

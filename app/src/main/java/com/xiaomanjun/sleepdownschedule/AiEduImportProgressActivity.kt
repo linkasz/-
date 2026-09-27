@@ -1,0 +1,5 @@
+package com.xiaomanjun.sleepdownschedule
+
+import com.xiaomanjun.sleepdownschedule.feature.importing.progress.AiEduImportProgressActivityHost
+
+class AiEduImportProgressActivity : AiEduImportProgressActivityHost()

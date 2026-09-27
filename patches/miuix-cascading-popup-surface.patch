@@ -1,0 +1,334 @@
+diff --git a/miuix-ui/src/commonMain/kotlin/top/yukonga/miuix/kmp/layout/CascadingListPopupLayout.kt b/miuix-ui/src/commonMain/kotlin/top/yukonga/miuix/kmp/layout/CascadingListPopupLayout.kt
+index 0c7f6a2..a0f855d 100644
+--- a/miuix-ui/src/commonMain/kotlin/top/yukonga/miuix/kmp/layout/CascadingListPopupLayout.kt
++++ b/miuix-ui/src/commonMain/kotlin/top/yukonga/miuix/kmp/layout/CascadingListPopupLayout.kt
+@@ -11,7 +11,9 @@ import androidx.compose.foundation.layout.Spacer
+ import androidx.compose.foundation.layout.fillMaxSize
+ import androidx.compose.runtime.Composable
+ import androidx.compose.runtime.CompositionLocalProvider
++import androidx.compose.runtime.DisposableEffect
+ import androidx.compose.runtime.LaunchedEffect
++import androidx.compose.runtime.SideEffect
+ import androidx.compose.runtime.getValue
+ import androidx.compose.runtime.mutableStateMapOf
+ import androidx.compose.runtime.mutableStateOf
+@@ -38,9 +40,10 @@ import androidx.compose.ui.unit.IntSize
+ import androidx.compose.ui.unit.LayoutDirection
+ import androidx.compose.ui.unit.dp
+ import androidx.navigationevent.NavigationEventInfo
++import androidx.navigationevent.NavigationEventDispatcher
++import androidx.navigationevent.NavigationEventHandler
+ import androidx.navigationevent.NavigationEventTransitionState
+-import androidx.navigationevent.compose.NavigationBackHandler
+-import androidx.navigationevent.compose.rememberNavigationEventState
++import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
+ import kotlinx.coroutines.flow.first
+ import kotlinx.coroutines.joinAll
+ import kotlinx.coroutines.launch
+@@ -51,6 +54,8 @@ import top.yukonga.miuix.kmp.basic.DropdownEntry
+ import top.yukonga.miuix.kmp.basic.DropdownItem
+ import top.yukonga.miuix.kmp.basic.ListPopupDefaults
+ import top.yukonga.miuix.kmp.basic.ListPopupLayoutInfo
++import top.yukonga.miuix.kmp.basic.ListPopupVisualStyle
++import top.yukonga.miuix.kmp.basic.LocalListPopupVisualStyle
+ import top.yukonga.miuix.kmp.basic.PopupPositionProvider
+ import top.yukonga.miuix.kmp.basic.rememberListPopupLayoutInfo
+ import top.yukonga.miuix.kmp.theme.LocalDismissState
+@@ -83,6 +88,8 @@ internal fun CascadingListPopupLayout(
+     enableWindowDim: Boolean = true,
+     maxHeight: Dp? = null,
+     minWidth: Dp = 200.dp,
++    visualStyle: ListPopupVisualStyle = LocalListPopupVisualStyle.current,
++    secondaryVisualStyle: ListPopupVisualStyle = visualStyle,
+     collapseOnSelection: Boolean = true,
+ ) {
+     val internalVisible = remember { mutableStateOf(false) }
+@@ -195,44 +202,57 @@ internal fun CascadingListPopupLayout(
+     val anchorBoundsByItem = remember { mutableStateMapOf<DropdownItem, IntRect>() }
+ 
+     popupHost(internalVisible.value) {
+-        val backState = rememberNavigationEventState(currentInfo = NavigationEventInfo.None)
+-        NavigationBackHandler(
+-            state = backState,
+-            isBackEnabled = show,
+-            onBackCancelled = {
++        val navigationOwner = LocalNavigationEventDispatcherOwner.current
++        val overlayBackHandler = remember(arrowEndDeg, coroutineScope) {
++            object : NavigationEventHandler<NavigationEventInfo>(NavigationEventInfo.None, true, false) {
++                override fun onBackCancelled() {
+                 // Reset whichever tree the gesture drove; depth cannot change mid-gesture.
+-                coroutineScope.launch {
++                    coroutineScope.launch {
++                        if (expandedItem != null) {
++                            val mainSpec = folmeSpring<Float>(EXPAND_SPRING_DAMPING, EXPAND_SPRING_RESPONSE)
++                            val arrowSpec = folmeSpring<Float>(MAIN_SPRING_DAMPING, ARROW_EXPAND_SPRING_RESPONSE)
++                            joinAll(
++                                launch { expandFraction.animateTo(1f, mainSpec) },
++                                launch { primaryScale.animateTo(PRIMARY_SHRUNK_SCALE, mainSpec) },
++                                launch { maskAlpha.animateTo(1f, mainSpec) },
++                                launch { arrowRotation.animateTo(arrowEndDeg, arrowSpec) },
++                            )
++                        } else {
++                            joinAll(
++                                launch { enterFraction.animateTo(1f, ListPopupDefaults.ResetAnimationSpec) },
++                                launch { enterAlpha.animateTo(1f, ListPopupDefaults.AlphaEnterAnimationSpec) },
++                                launch { dimProgress.animateTo(1f, ListPopupDefaults.DimEnterAnimationSpec) },
++                            )
++                        }
++                    }
++                }
++
++                override fun onBackCompleted() {
++                    // Overlay priority keeps the IME mounted until both popup levels are gone.
+                     if (expandedItem != null) {
+-                        val mainSpec = folmeSpring<Float>(EXPAND_SPRING_DAMPING, EXPAND_SPRING_RESPONSE)
+-                        val arrowSpec = folmeSpring<Float>(MAIN_SPRING_DAMPING, ARROW_EXPAND_SPRING_RESPONSE)
+-                        joinAll(
+-                            launch { expandFraction.animateTo(1f, mainSpec) },
+-                            launch { primaryScale.animateTo(PRIMARY_SHRUNK_SCALE, mainSpec) },
+-                            launch { maskAlpha.animateTo(1f, mainSpec) },
+-                            launch { arrowRotation.animateTo(arrowEndDeg, arrowSpec) },
+-                        )
++                        expandedItem = null
+                     } else {
+-                        joinAll(
+-                            launch { enterFraction.animateTo(1f, ListPopupDefaults.ResetAnimationSpec) },
+-                            launch { enterAlpha.animateTo(1f, ListPopupDefaults.AlphaEnterAnimationSpec) },
+-                            launch { dimProgress.animateTo(1f, ListPopupDefaults.DimEnterAnimationSpec) },
+-                        )
++                        currentOnDismiss()
+                     }
+                 }
+-            },
+-            // Mirror outside-tap: depth > 0 collapses the secondary, depth 0 dismisses the popup.
+-            onBackCompleted = {
+-                if (expandedItem != null) {
+-                    expandedItem = null
+-                } else {
+-                    currentOnDismiss()
+-                }
+-            },
+-        )
++            }
++        }
++        SideEffect {
++            overlayBackHandler.isBackEnabled = show
++        }
++        DisposableEffect(navigationOwner, overlayBackHandler) {
++            if (navigationOwner != null) {
++                navigationOwner.navigationEventDispatcher.addHandler(
++                    overlayBackHandler,
++                    NavigationEventDispatcher.PRIORITY_OVERLAY,
++                )
++            }
++            onDispose { overlayBackHandler.remove() }
++        }
+ 
+-        LaunchedEffect(Unit) {
++        LaunchedEffect(overlayBackHandler) {
+             // Single-coroutine collector so per-frame ticks do not relaunch this effect.
+-            snapshotFlow { backState.transitionState }
++            snapshotFlow { overlayBackHandler.transitionState }
+                 .collect { transitionState ->
+                     if (
+                         transitionState is NavigationEventTransitionState.InProgress &&
+@@ -281,11 +301,10 @@ internal fun CascadingListPopupLayout(
+                         }
+                         .pointerInput(Unit) {
+                             detectTapGestures(onTap = {
+-                                if (expandedItem != null) {
+-                                    expandedItem = null
+-                                } else {
+-                                    currentOnDismiss()
+-                                }
++                                // A blank-area tap closes the whole popup tree in one step. The
++                                // still-focused text field and IME are intentionally left alone;
++                                // a second blank tap may then follow the page's normal IME policy.
++                                currentOnDismiss()
+                             })
+                         },
+                 ) {
+@@ -304,8 +323,6 @@ internal fun CascadingListPopupLayout(
+                         },
+                         getAnchorBounds = { anchorBoundsByItem[it] },
+                         setAnchorBounds = { item, bounds ->
+-                            // Freeze the anchor once secondary is shown so primary's scale
+-                            // animation can't drift it via onGloballyPositioned.
+                             if (displayedItem == null) {
+                                 anchorBoundsByItem[item] = bounds
+                             }
+@@ -318,8 +335,10 @@ internal fun CascadingListPopupLayout(
+                         alignment = alignment,
+                         hostOriginInWindow = { hostPositionInWindow },
+                         maxHeight = maxHeight,
+-                        minWidth = minWidth,
+-                        dropdownColors = dropdownColors,
++                    minWidth = minWidth,
++                    visualStyle = visualStyle,
++                    secondaryVisualStyle = secondaryVisualStyle,
++                    dropdownColors = dropdownColors,
+                         enterFraction = { enterFraction.value },
+                         enterAlpha = { enterAlpha.value },
+                         primaryScale = { primaryScale.value },
+@@ -367,6 +386,8 @@ private fun CascadingMorphSubLayout(
+     hostOriginInWindow: () -> IntOffset,
+     maxHeight: Dp?,
+     minWidth: Dp,
++    visualStyle: ListPopupVisualStyle,
++    secondaryVisualStyle: ListPopupVisualStyle,
+     dropdownColors: DropdownColors,
+     enterFraction: () -> Float,
+     enterAlpha: () -> Float,
+@@ -380,9 +401,11 @@ private fun CascadingMorphSubLayout(
+     maskColor: Color,
+ ) {
+     SubcomposeLayout(modifier = Modifier.fillMaxSize()) { constraints ->
+-        val resolvedMaxHeightPx = maxHeight?.roundToPx()?.coerceAtLeast(50.dp.roundToPx())
+-            ?: (windowBounds.height - popupMargin.top - popupMargin.bottom)
+-                .coerceAtLeast(50.dp.roundToPx())
++        val availableHeightPx = (windowBounds.height - popupMargin.top - popupMargin.bottom)
++            .coerceAtLeast(50.dp.roundToPx())
++        val resolvedMaxHeightPx = (maxHeight?.roundToPx() ?: availableHeightPx)
++            .coerceAtLeast(50.dp.roundToPx())
++            .coerceAtMost(availableHeightPx)
+         val minWidthPx = minWidth.roundToPx().coerceAtMost(constraints.maxWidth)
+         val primaryConstraints = Constraints(
+             minWidth = minWidthPx,
+@@ -418,6 +441,7 @@ private fun CascadingMorphSubLayout(
+                 popupLayoutPosition = layoutInfo.popupLayoutPosition,
+                 transformOrigin = layoutInfo.localTransformOrigin,
+                 surfaceColor = surfaceColor,
++                visualStyle = visualStyle,
+                 dropdownColors = dropdownColors,
+                 primaryScale = primaryScale,
+                 maskAlpha = maskAlpha,
+@@ -523,6 +547,7 @@ private fun CascadingMorphSubLayout(
+                             onLeafSelected = onLeafSelected,
+                             dropdownColors = dropdownColors,
+                             surfaceColor = surfaceColor,
++                            visualStyle = secondaryVisualStyle,
+                         )
+                     }.map { it.measure(unionConstraints) }
+                     SecondaryLayout(placeables, unionRect)
+diff --git a/miuix-ui/src/commonMain/kotlin/top/yukonga/miuix/kmp/layout/CascadingMorphContent.kt b/miuix-ui/src/commonMain/kotlin/top/yukonga/miuix/kmp/layout/CascadingMorphContent.kt
+index 3c496e1..7d32fdb 100644
+--- a/miuix-ui/src/commonMain/kotlin/top/yukonga/miuix/kmp/layout/CascadingMorphContent.kt
++++ b/miuix-ui/src/commonMain/kotlin/top/yukonga/miuix/kmp/layout/CascadingMorphContent.kt
+@@ -40,6 +40,7 @@ import top.yukonga.miuix.kmp.basic.DropdownImpl
+ import top.yukonga.miuix.kmp.basic.DropdownItem
+ import top.yukonga.miuix.kmp.basic.HorizontalDivider
+ import top.yukonga.miuix.kmp.basic.ListPopupColumn
++import top.yukonga.miuix.kmp.basic.ListPopupVisualStyle
+ import top.yukonga.miuix.kmp.basic.PopupLayoutPosition
+ import top.yukonga.miuix.kmp.basic.popupClipReveal
+ import top.yukonga.miuix.kmp.squircle.isSquircleEnabled
+@@ -67,6 +68,7 @@ internal fun CascadingPrimaryContent(
+     popupLayoutPosition: PopupLayoutPosition,
+     transformOrigin: TransformOrigin,
+     surfaceColor: Color,
++    visualStyle: ListPopupVisualStyle,
+     dropdownColors: DropdownColors,
+     primaryScale: () -> Float,
+     maskAlpha: () -> Float,
+@@ -74,7 +76,8 @@ internal fun CascadingPrimaryContent(
+     onCollapseSecondary: () -> Unit,
+ ) {
+     val isExpanded = expandedItem != null
+-    val shape = remember { RoundedCornerShape(CascadingPopupCornerRadius) }
++    val popupCornerRadius = visualStyle.cornerRadius
++    val shape = remember(popupCornerRadius) { RoundedCornerShape(popupCornerRadius) }
+     Box(
+         modifier = Modifier
+             .graphicsLayer {
+@@ -90,9 +93,10 @@ internal fun CascadingPrimaryContent(
+                 scaleY = s
+                 this.transformOrigin = transformOrigin
+             }
+-            .popupClipReveal(enterFraction, popupLayoutPosition, CascadingPopupCornerRadius, isSquircleEnabled())
++            .popupClipReveal(enterFraction, popupLayoutPosition, popupCornerRadius, isSquircleEnabled())
+             .dropShadow(shape = shape, shadow = CascadeShadow)
+-            .background(color = surfaceColor),
++            .then(visualStyle.surfaceModifier)
++            .background(color = visualStyle.backgroundColor ?: surfaceColor),
+     ) {
+         Box {
+             ListPopupColumn {
+@@ -224,8 +228,10 @@ internal fun CascadingSecondaryContent(
+     onLeafSelected: (DropdownItem) -> Unit,
+     dropdownColors: DropdownColors,
+     surfaceColor: Color,
++    visualStyle: ListPopupVisualStyle,
+ ) {
+-    val cornerPx = with(LocalDensity.current) { CascadingPopupCornerRadius.toPx() }
++    val popupCornerRadius = visualStyle.cornerRadius
++    val cornerPx = with(LocalDensity.current) { popupCornerRadius.toPx() }
+     val anchorTopLeft = anchorLocalInUnion.topLeft
+     val secondaryTopLeft = secondaryLocalInUnion.topLeft
+     val secondaryWidth = secondaryLocalInUnion.width
+@@ -239,7 +245,7 @@ internal fun CascadingSecondaryContent(
+                 alpha = enterAlpha()
+                 this.transformOrigin = transformOrigin
+             }
+-            .popupClipReveal(enterFraction, popupLayoutPosition, CascadingPopupCornerRadius, isSquircleEnabled())
++            .popupClipReveal(enterFraction, popupLayoutPosition, popupCornerRadius, isSquircleEnabled())
+             .drawWithCache {
+                 val innerPath = Path()
+                 onDrawWithContent {
+@@ -280,15 +286,12 @@ internal fun CascadingSecondaryContent(
+                         ),
+                     )
+                     clipPath(innerPath) {
+-                        drawRect(
+-                            color = surfaceColor,
+-                            topLeft = androidx.compose.ui.geometry.Offset.Zero,
+-                            size = this.size,
+-                        )
+                         this@onDrawWithContent.drawContent()
+                     }
+                 }
+             }
++            .then(visualStyle.surfaceModifier)
++            .background(color = visualStyle.backgroundColor ?: surfaceColor)
+             // Occupy full union size so the inner content can slide between anchor and
+             // secondary even when the anchor sits outside the secondary bounds.
+             .layout { measurable, _ ->
+diff --git a/miuix-ui/src/commonMain/kotlin/top/yukonga/miuix/kmp/overlay/OverlayCascadingListPopup.kt b/miuix-ui/src/commonMain/kotlin/top/yukonga/miuix/kmp/overlay/OverlayCascadingListPopup.kt
+index 0124fe2..9280de3 100644
+--- a/miuix-ui/src/commonMain/kotlin/top/yukonga/miuix/kmp/overlay/OverlayCascadingListPopup.kt
++++ b/miuix-ui/src/commonMain/kotlin/top/yukonga/miuix/kmp/overlay/OverlayCascadingListPopup.kt
+@@ -16,6 +16,8 @@ import top.yukonga.miuix.kmp.basic.DropdownDefaults
+ import top.yukonga.miuix.kmp.basic.DropdownEntry
+ import top.yukonga.miuix.kmp.basic.DropdownItem
+ import top.yukonga.miuix.kmp.basic.ListPopupDefaults
++import top.yukonga.miuix.kmp.basic.ListPopupVisualStyle
++import top.yukonga.miuix.kmp.basic.LocalListPopupVisualStyle
+ import top.yukonga.miuix.kmp.basic.PopupPositionProvider
+ import top.yukonga.miuix.kmp.layout.CascadingListPopupLayout
+ import top.yukonga.miuix.kmp.utils.MiuixPopupUtils.Companion.PopupLayout
+@@ -51,6 +53,9 @@ fun OverlayCascadingListPopup(
+     maxHeight: Dp? = null,
+     minWidth: Dp = 200.dp,
+     renderInRootScaffold: Boolean = true,
++    excludeFromBackdropCapture: Boolean = false,
++    visualStyle: ListPopupVisualStyle = LocalListPopupVisualStyle.current,
++    secondaryVisualStyle: ListPopupVisualStyle = visualStyle,
+     dropdownColors: DropdownColors = DropdownDefaults.dropdownColors(),
+     collapseOnSelection: Boolean = true,
+ ) {
+@@ -66,6 +71,7 @@ fun OverlayCascadingListPopup(
+                 enterTransition = EnterTransition.None,
+                 exitTransition = ExitTransition.None,
+                 renderInRootScaffold = renderInRootScaffold,
++                excludeFromBackdropCapture = excludeFromBackdropCapture,
+             ) {
+                 hostContent()
+             }
+@@ -79,6 +85,8 @@ fun OverlayCascadingListPopup(
+         enableWindowDim = enableWindowDim,
+         maxHeight = maxHeight,
+         minWidth = minWidth,
++        visualStyle = visualStyle,
++        secondaryVisualStyle = secondaryVisualStyle,
+         dropdownColors = dropdownColors,
+         collapseOnSelection = collapseOnSelection,
+     )
