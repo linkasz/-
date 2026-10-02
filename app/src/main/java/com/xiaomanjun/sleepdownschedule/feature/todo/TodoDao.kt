@@ -63,6 +63,19 @@ interface TodoDao {
     @Upsert
     suspend fun upsert(item: TodoItemEntity): Long
 
+    @Transaction
+    suspend fun upsertWithSubtasks(parent: TodoItemEntity, subtasks: List<TodoItemEntity>): Long {
+        if (parent.id > 0L) {
+            val current = getById(parent.id)
+            require(current != null) { "该待办已不存在" }
+            require(current.deletedAt == null) { "请先从最近删除恢复待办" }
+        }
+        val parentId = upsert(parent).takeIf { it > 0L } ?: parent.id
+        check(parentId > 0L) { "待办保存未返回有效 ID" }
+        subtasks.forEach { upsert(it.copy(parentId = parentId)) }
+        return parentId
+    }
+
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertGroup(group: TodoGroupEntity): Long
 

@@ -16,6 +16,19 @@ class TodoRepository @Inject constructor(private val dao: TodoDao) {
     }
 
     suspend fun save(draft: TodoDraft): Long {
+        val entity = entityForSave(draft)
+        return dao.upsert(entity).takeIf { it > 0L } ?: entity.id
+    }
+
+    suspend fun saveWithSubtasks(draft: TodoDraft, subtaskTitles: List<String>): Long {
+        val parent = entityForSave(draft)
+        val subtasks = subtaskTitles.map { title ->
+            entityForSave(TodoDraft(title = title, groupId = draft.groupId, courseId = draft.courseId))
+        }
+        return dao.upsertWithSubtasks(parent, subtasks)
+    }
+
+    private suspend fun entityForSave(draft: TodoDraft): TodoItemEntity {
         val title = draft.title.trim()
         require(title.isNotEmpty()) { "待办标题不能为空" }
         require(draft.endAt == null || (!draft.allDay && draft.dueAt != null && draft.endAt > draft.dueAt)) { "结束时间必须晚于开始时间" }
@@ -30,7 +43,7 @@ class TodoRepository @Inject constructor(private val dao: TodoDao) {
             require(java.time.Instant.ofEpochMilli(draft.endAt).atZone(zone).toLocalDate() ==
                 java.time.Instant.ofEpochMilli(draft.dueAt).atZone(zone).toLocalDate()) { "时间段必须在同一天内" }
         }
-        val entity = TodoItemEntity(
+        return TodoItemEntity(
             id = draft.id,
             title = title,
             description = draft.description.trim(),
@@ -57,8 +70,6 @@ class TodoRepository @Inject constructor(private val dao: TodoDao) {
             calendarSyncToken = existing?.calendarSyncToken,
             calendarSyncState = existing?.calendarSyncState ?: TodoCalendarSyncState.PENDING
         )
-        val savedId = dao.upsert(entity)
-        return savedId.takeIf { it > 0L } ?: entity.id
     }
 
     suspend fun toggle(item: TodoItemEntity): TodoItemEntity? = dao.toggleCompleted(item, System.currentTimeMillis())

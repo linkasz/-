@@ -1,13 +1,13 @@
 # 版本基线与发布关系
 
-本文说明当前维护方式；构建配置是当前版本事实来源。基线快照核对于 **2026-09-29**。
+本文说明当前维护方式；构建配置是当前版本事实来源。基线快照核对于 **2026-10-03**。
 
 ## 当前基线
 
 | 项目 | 当前事实 | 核对入口 |
 | --- | --- | --- |
-| 持续开发分支 | `main`；本轮发布候选为 `v1.0.1` | `app/build.gradle.kts` 与发布检查 |
-| Android 主应用 | `com.scheduleplus.student`，`versionName=1.0.1`，`versionCode=36` | `app/build.gradle.kts` |
+| 持续开发分支 | `main`；本轮同步候选为 `codex/release-1.0.2`，尚未合并或发布 | `app/build.gradle.kts` 与发布检查 |
+| Android 主应用 | `com.scheduleplus.student`，`versionName=1.0.2`，`versionCode=37`，Room 45 | `app/build.gradle.kts`、`AppDatabase.kt` |
 | 发行渠道 | `github` 与 `store` 两种 flavor；厂商实验入口由 `SLEEPDOWN_EXPERIMENTAL_FEATURES` 按渠道控制 | `app/build.gradle.kts`、`app/src/github/`、`app/src/store/` |
 | 课程组件 | 独立包 `com.suda.yzune.wakeupschedule`；构建版本 `6.0.18` / `258` | `coloros-wakeup-proxy/build.gradle.kts` |
 | 历史实验线 | 旧 Git 提交保留；旧公开 Release 与版本标签按本轮收口清理 | Git 提交历史 |
@@ -21,11 +21,13 @@
 
 | 类型 | 命名和标签 | 代码来源 | 更新日志与发布页 |
 | --- | --- | --- | --- |
-| 正式版 | `1.0.1` / `v1.0.1` | `main` 上经过发布验证的提交 | 正式版，附 APK、更新清单和完整源码链接 |
-| 普通 Beta | `1.0.2_betaN` / 对应 tag | 同一 `main` 基线的发布候选 | 用户主动启用 Beta 后才检查预发布版本 |
+| 正式版 | `1.0.2` / `v1.0.2` | `main` 上经过发布验证的提交 | 正式版，附 APK、更新清单和完整源码链接 |
+| 普通 Beta | `1.0.3_betaN` / 对应 tag | 同一 `main` 基线的发布候选 | 用户主动启用 Beta 后才检查预发布版本 |
 | 厂商实验功能 | 无独立版本后缀 | 当前 `main` 的隔离实现 | 随对应正式版或 Beta 交付，在说明中标明实验状态与设备条件 |
 
 升级前核对相同 applicationId、兼容签名及递增的 versionCode；不能仅凭版本名称判断。旧身份 `com.example.courseschedule` 不能直接覆盖安装当前包，需先在旧版导出 `.sleepdown` 再恢复，见[迁移说明](migration/1_2_0_PACKAGE_MIGRATION.md)。
+
+1.0.2 的本地完整版保留私有人格核心；公开源码与公开 APK 使用空核心占位。两者包名、版本和签名一致，人格行为可能不同；只将公开版 APK 与对应更新清单用于 GitHub 分发。
 
 ## 一轮发布怎样收口
 

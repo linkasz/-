@@ -6,7 +6,7 @@ GitHub 仓库描述建议：`基于 SleepDown-Schedule 修改的课程与待办�
 
 ## 稳定版
 
-1. 更新 `app/build.gradle.kts` 的版本配置。当前正式发布基线为 `1.0.1 / versionCode 36`，应用身份为 `com.scheduleplus.student`；后续 versionCode 必须单调增加。
+1. 更新 `app/build.gradle.kts` 的版本配置。当前候选为 `1.0.2 / versionCode 37`，应用身份为 `com.scheduleplus.student`；后续 versionCode 必须单调增加。
 2. 按仓库 `AGENTS.md` 配置仓库外的 Release 签名，执行：
 
    ```powershell
@@ -19,7 +19,7 @@ GitHub 仓库描述建议：`基于 SleepDown-Schedule 修改的课程与待办�
 
 ## Beta
 
-使用相同流程，构建时传入例如 `-Psleepdown.versionName=1.0.2_beta1 -Psleepdown.versionCode=37`；清单任务默认会生成匹配的 `v1.0.2_beta1` tag。GitHub Release 标记为 prerelease。Beta 和正式版都附 APK 与更新 JSON；应用默认只查询稳定版，用户打开 Beta 开关后才查询预发布版本。
+使用相同流程，构建时传入例如 `-Psleepdown.versionName=1.0.3_beta1 -Psleepdown.versionCode=38`；清单任务默认会生成匹配的 `v1.0.3_beta1` tag。GitHub Release 标记为 prerelease。Beta 和正式版都附 APK 与更新 JSON；应用默认只查询稳定版，用户打开 Beta 开关后才查询预发布版本。
 
 ## 更新清单
 
@@ -28,17 +28,17 @@ GitHub 仓库描述建议：`基于 SleepDown-Schedule 修改的课程与待办�
 ```json
 {
   "applicationId": "com.scheduleplus.student",
-  "versionName": "1.0.1",
-  "versionCode": 36,
-  "apkUrl": "https://github.com/linkasz/-/releases/download/v1.0.1/app-github-release.apk",
+  "versionName": "1.0.2",
+  "versionCode": 37,
+  "apkUrl": "https://github.com/linkasz/-/releases/download/v1.0.2/app-github-release.apk",
   "sha256": "由 APK 计算出的 64 位小写 SHA-256",
-  "releaseUrl": "https://github.com/linkasz/-/releases/tag/v1.0.1"
+  "releaseUrl": "https://github.com/linkasz/-/releases/tag/v1.0.2"
 }
 ```
 
 更新器只接受与当前 Release API 元数据匹配的自有仓库资产地址，并在安装前验证清单、包名、版本和 APK 摘要。Android 安装器负责最终签名兼容性校验并要求用户确认。
 
-本地交付使用 `时序清单-v1.0.1-正式版.apk`；当前更新协议仍固定读取 Release 中的 `app-github-release.apk`。发布时将同一个已核验 APK 以协议要求的资产名上传；若另附中文命名副本，两个文件必须具有相同 SHA-256。
+本轮分别交付 `时序清单-v1.0.2-本地完整版.apk` 与 `时序清单-v1.0.2-公开版.apk`。公开源码和公开 APK 的来源人格 `corePrompt` 及内置核心常量为空；本地真实核心保留原位，不进入公开快照。两包的人格行为可能不同。当前更新协议仍固定读取 Release 中的 `app-github-release.apk`；只上传已核验的公开版，配套清单必须由公开版 APK 生成。
 
 生成本地 APK/清单不等于已发布。当前 GitHub 插件可操作源码、分支和 PR，未提供创建 Release 或上传附件工具；正式发布还需可用的附件上传能力。公开版 About 与发布说明的署名处理应按实际书面豁免范围确定，不把本地豁免自动扩大为公开分发豁免。
 

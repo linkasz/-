@@ -362,6 +362,7 @@ internal fun TodoPlusScreen(
     val calendarMessage by viewModel.calendarMessage.collectAsStateWithLifecycle()
     val calendarReview by viewModel.calendarReview.collectAsStateWithLifecycle()
     val operationError by viewModel.operationError.collectAsStateWithLifecycle()
+    val saving by viewModel.saving.collectAsStateWithLifecycle()
     val autoSync by viewModel.autoCalendarSync.collectAsStateWithLifecycle()
     val glassForeground = sleepDownGlassForegroundColor(config)
     val coursePalette = LocalCourseCardPalette.current.ifEmpty { DefaultCourseCardPalette }
@@ -421,6 +422,7 @@ internal fun TodoPlusScreen(
     }
     val haptics = LocalHapticFeedback.current
     fun openEditor(value: TodoEditState) {
+        if (viewModel.saving.value) return
         editor = value
         editorVisible = true
     }
@@ -646,6 +648,7 @@ internal fun TodoPlusScreen(
                     backdrop = backdrop,
                     config = config,
                     aiLoading = aiState.isLoading,
+                    saving = saving,
                     onChange = { editor = it },
                     onAiExtract = { text ->
                         if (viewModel.readAiConfig().apiKey.isBlank()) showAiSettings = true
@@ -657,6 +660,7 @@ internal fun TodoPlusScreen(
                         )
                     },
                     onSave = { form ->
+                        if (!editorVisible || viewModel.saving.value) return@TodoEditSheet
                         val parsedDue = runCatching { parseDue(form.date, form.time) }
                         if (parsedDue.isFailure) {
                             Toast.makeText(
@@ -686,11 +690,7 @@ internal fun TodoPlusScreen(
                             persistentReminder = form.persistentReminder,
                             strongReminder = form.strongReminder
                         )
-                        viewModel.save(draft) { parentId ->
-                            form.extractedSubtasks.forEach { title ->
-                                viewModel.save(TodoDraft(title = title, groupId = form.groupId, courseId = form.courseId, parentId = parentId))
-                            }
-                            viewModel.autoSyncAfterChange()
+                        viewModel.save(draft, form.extractedSubtasks.toList()) {
                             closeEditor()
                         }
                     },
@@ -2391,6 +2391,7 @@ private fun TodoEditSheet(
     backdrop: Backdrop?,
     config: ScheduleConfigEntity,
     aiLoading: Boolean,
+    saving: Boolean,
     onChange: (TodoEditState) -> Unit,
     onAiExtract: (String) -> Unit,
     onPhotoExtract: () -> Unit,
@@ -2413,6 +2414,7 @@ private fun TodoEditSheet(
     var validationError by remember { mutableStateOf<String?>(null) }
     fun updateEdit(value: TodoEditState) { edit = value; onChange(value); validationError = null }
     fun saveEdit() {
+        if (!show || saving) return
         val result = runCatching {
             val due = parseDue(edit.date, edit.time)
             if (edit.endTime.isNotBlank()) {
@@ -2452,7 +2454,7 @@ private fun TodoEditSheet(
                         fontWeight = FontWeight.SemiBold)
                     if (!advanced) TodoEditorActionPill("确认保存", backdrop = backdrop, config = config,
                         modifier = Modifier.align(Alignment.CenterEnd).size(48.dp), primary = true,
-                        enabled = edit.title.isNotBlank() && !aiLoading, onClick = ::saveEdit) {
+                        enabled = edit.title.isNotBlank() && !aiLoading && !saving, onClick = ::saveEdit) {
                         Icon(Icons.Default.Check, "确认保存", tint = Color.White, modifier = Modifier.size(24.dp))
                     }
                 }

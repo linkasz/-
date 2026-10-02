@@ -162,6 +162,14 @@ class TodoCalendarSync @Inject constructor(
         calendarMutationMutex.withLock { removeLocked(item) }
     }
 
+    suspend fun removeIfNoLongerScheduled(todoId: Long) = withContext(Dispatchers.IO) {
+        calendarMutationMutex.withLock {
+            val current = repository.getById(todoId) ?: return@withLock
+            // A later edit may have restored the date before this follow-up acquired the lock.
+            if (current.dueAt == null || current.parentId != null) removeLocked(current)
+        }
+    }
+
     suspend fun archive(item: TodoItemEntity) = withContext(Dispatchers.IO) {
         calendarMutationMutex.withLock {
             val rows = repository.itemsForSync()

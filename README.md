@@ -38,6 +38,6 @@
 可使用 [Release 页面模板](.github/release-template.md)。
 
 感谢 SleepDown-Schedule 原作者 xiaomanjun233 的项目与贡献：[SleepDown-Schedule](https://github.com/xiaomanjun233/SleepDown-Schedule)。
-# 1.0.2 公开构建说明
+## 1.0.2 公开构建说明
 
 本仓库的来源人格使用空核心占位，保留可见风格、工具与用户确认链路；与保留真实核心的本地完整版存在人格表现差异。详见 [公开人格策略](docs/release/PUBLIC_PERSONA_POLICY.md)。

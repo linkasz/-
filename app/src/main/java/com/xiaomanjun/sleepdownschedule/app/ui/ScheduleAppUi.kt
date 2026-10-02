@@ -9056,6 +9056,16 @@ fun ChangelogSettingsScreen(
             }
         }
         item {
+            AboutSectionHeading(title = "本次更新 · 1.0.2", summary = "确认保存更可靠。")
+            AboutGlassPanel(darkTheme = darkTheme, modifier = Modifier.fillMaxWidth()) {
+                SettingsInfoRow("待办保存", "主任务和子任务一起保存，保存过程中避免重复提交；离开页面后仍会完成已确认的保存。")
+                SettingsDivider()
+                SettingsInfoRow("AI 确认创建", "区分任务已保存与提醒、日历同步结果，避免同步失败后重复创建。")
+                SettingsDivider()
+                SettingsInfoRow("日历同步", "清理前核对最新任务状态，避免误删刚重新安排的事件。")
+            }
+        }
+        item {
             AboutSectionHeading(title = "应用能力", summary = "围绕课程、任务和日常时间安排。")
             AboutGlassPanel(darkTheme = darkTheme, modifier = Modifier.fillMaxWidth()) {
                 SettingsInfoRow("课程表", "多课表、教务导入、手动编辑、课程提醒、备份恢复与桌面小组件。")
@@ -9104,6 +9114,16 @@ fun ChangelogSettingsScreen(
                 )
                 SettingsDivider()
                 SettingsInfoRow("许可证", "完整许可与第三方声明见项目仓库中的 LICENSE.md 和 THIRD_PARTY_NOTICES.md。")
+                SettingsDivider()
+                SettingsNavigationRow(
+                    "项目来源",
+                    "基于 SleepDown课程表修改；原作者 xiaomanjun233；非官方修改版。",
+                    onClick = {
+                        runCatching {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/xiaomanjun233/SleepDown-Schedule")))
+                        }
+                    }
+                )
             }
         }
     }

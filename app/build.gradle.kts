@@ -31,7 +31,8 @@ val releaseStoreFilePath = releaseSecret("sleepdown.releaseStoreFile", "SLEEPDOW
 val releaseStorePassword = releaseSecret("sleepdown.releaseStorePassword", "SLEEPDOWN_RELEASE_STORE_PASSWORD")
 val releaseKeyAlias = releaseSecret("sleepdown.releaseKeyAlias", "SLEEPDOWN_RELEASE_KEY_ALIAS")
 val releaseKeyPassword = releaseSecret("sleepdown.releaseKeyPassword", "SLEEPDOWN_RELEASE_KEY_PASSWORD")
-val remoteConfigSecret = releaseSecret("sleepdown.remoteConfigSecret", "SLEEPDOWN_REMOTE_CONFIG_SECRET").orEmpty()
+// Public packages must never inherit backend credentials from local signing properties.
+val remoteConfigSecret = ""
 val vivoCourseScene = providers.gradleProperty("sleepdown.vivoCourseScene").orElse("").get()
 val vivoApprovedCertSha256 = providers.gradleProperty("sleepdown.vivoApprovedCertSha256").orElse("").get()
 require(vivoCourseScene.isEmpty() || Regex("[A-Z][A-Z0-9_]*").matches(vivoCourseScene)) {
@@ -41,8 +42,8 @@ require(vivoApprovedCertSha256.isEmpty() || Regex("[A-Fa-f0-9]{64}").matches(viv
     "sleepdown.vivoApprovedCertSha256 must be the approved signing certificate SHA-256"
 }
 val schedulePlusApplicationId = "com.scheduleplus.student"
-val sleepDownVersionName = providers.gradleProperty("sleepdown.versionName").orElse("1.0.1").get()
-val sleepDownVersionCode = providers.gradleProperty("sleepdown.versionCode").map { it.toInt() }.getOrElse(36)
+val sleepDownVersionName = providers.gradleProperty("sleepdown.versionName").orElse("1.0.2").get()
+val sleepDownVersionCode = providers.gradleProperty("sleepdown.versionCode").map { it.toInt() }.getOrElse(37)
 val skipReleaseResourceShrink = providers.gradleProperty("sleepdown.skipReleaseResourceShrink")
     .map(String::toBoolean)
     .getOrElse(false)

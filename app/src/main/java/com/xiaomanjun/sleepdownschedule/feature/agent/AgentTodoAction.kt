@@ -45,9 +45,9 @@ internal fun validateAgentTodo(draft: AgentTodoDraft?, facts: DayAgentFacts): To
 internal suspend fun executeConfirmedAgentTodos(context: Context, plan: AgentPlan): AgentPlanExecutionResult {
     val db = (context.applicationContext as CourseScheduleApp).database
     val repository = TodoRepository(db.todoDao())
-    return try {
+    val ids = try {
         require(plan.actions.isNotEmpty() && plan.actions.all { it.type == AgentValidatedActionType.CREATE_TODO }) { "待办计划不能混合其他操作" }
-        val ids = db.withTransaction {
+        db.withTransaction {
             plan.actions.map { action ->
                 val draft = requireNotNull(action.todo) { "待办信息不完整" }
                 require(draft.id == 0L && draft.parentId == null && draft.groupId == null) { "此操作只能新建未分组待办" }
@@ -60,16 +60,34 @@ internal suspend fun executeConfirmedAgentTodos(context: Context, plan: AgentPla
                 id
             }
         }
-        val followUp = mutableListOf<String>()
-        try { NotificationScheduler.requestReschedule(context); TodoTasksWidgetProvider.refreshAll(context) }
-        catch (error: Exception) { followUp += "提醒或组件刷新尚未完成，请重新进入应用检查" }
-        val sync = TodoCalendarSync(context, repository)
-        if (sync.autoSyncEnabled()) {
-            try { if (sync.syncAll().issues.isNotEmpty()) followUp += "系统日历关联需在日历页确认" }
-            catch (error: CancellationException) { throw error }
-            catch (error: Exception) { followUp += "本地待办已保存，系统日历同步尚未完成" }
-        }
-        AgentPlanExecutionResult(true, null, true, (listOf("已创建 ${ids.size} 项待办") + followUp).joinToString("；"))
     } catch (error: CancellationException) { throw error }
-    catch (error: Exception) { AgentPlanExecutionResult(false, null, false, error.message ?: "创建待办失败") }
+    catch (error: Exception) { return AgentPlanExecutionResult(false, null, false, error.message ?: "创建待办失败") }
+    return agentTodoCreationFollowUp(ids.size,
+        refreshReminders = { NotificationScheduler.requestReschedule(context) },
+        refreshWidgets = { TodoTasksWidgetProvider.refreshAll(context) },
+        syncCalendar = {
+            val sync = TodoCalendarSync(context, repository)
+            sync.autoSyncEnabled() && sync.syncAll().issues.isNotEmpty()
+        })
+}
+
+/** Called only after the complete creation transaction has committed. */
+internal suspend fun agentTodoCreationFollowUp(
+    count: Int,
+    refreshReminders: () -> Unit,
+    refreshWidgets: () -> Unit,
+    syncCalendar: suspend () -> Boolean
+): AgentPlanExecutionResult {
+    val messages = mutableListOf("已创建 $count 项待办")
+    suspend fun followUp(message: String, action: suspend () -> Unit) {
+        try { action() }
+        catch (error: CancellationException) { throw error }
+        catch (error: Exception) { messages += message }
+    }
+    followUp("提醒更新尚未完成") { refreshReminders() }
+    followUp("组件刷新尚未完成") { refreshWidgets() }
+    followUp("本地待办已保存，系统日历同步尚未完成") {
+        if (syncCalendar()) messages += "系统日历关联需在日历页确认"
+    }
+    return AgentPlanExecutionResult(true, null, true, messages.joinToString("；"))
 }

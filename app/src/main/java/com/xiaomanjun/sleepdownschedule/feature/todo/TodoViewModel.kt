@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -53,6 +54,8 @@ class TodoViewModel @Inject constructor(
     val calendarReview = mutableCalendarReview
     private val mutableOperationError = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
     val operationError = mutableOperationError
+    private val mutableSaving = MutableStateFlow(false)
+    val saving = mutableSaving.asStateFlow()
     val autoCalendarSync = kotlinx.coroutines.flow.MutableStateFlow(calendarSync.autoSyncEnabled())
 
     init {
@@ -63,28 +66,51 @@ class TodoViewModel @Inject constructor(
         }
     }
 
-    fun save(draft: TodoDraft, onSaved: (Long) -> Unit = {}) {
-        viewModelScope.launch {
-            val existing = runCatching {
-                if (draft.id > 0L) repository.getById(draft.id) else null
-            }.getOrElse {
-                mutableOperationError.value = it.message ?: "读取待办失败"
-                return@launch
-            }
-            runCatching { repository.save(draft) }.onSuccess { id ->
-                androidx.core.app.NotificationManagerCompat.from(context).cancel(id.hashCode())
-                if (
-                    existing != null && (existing.calendarEventId != null || existing.calendarSyncToken != null) &&
-                    (draft.dueAt == null || draft.parentId != null)
-                ) {
-                    runCatching { calendarSync.remove(existing) }
-                        .onFailure { mutableCalendarMessage.value = it.message ?: "清理旧日历事件失败" }
+    fun save(draft: TodoDraft, subtaskTitles: List<String> = emptyList(), onSaved: (Long) -> Unit = {}) {
+        // Claim synchronously, before launch/recomposition can allow another confirmation.
+        if (!mutableSaving.compareAndSet(false, true)) return
+        val applicationScope = (context.applicationContext as com.xiaomanjun.sleepdownschedule.CourseScheduleApp).applicationScope
+        applicationScope.launch {
+            try {
+                val existing: TodoItemEntity?
+                val id: Long
+                try {
+                    existing = if (draft.id > 0L) repository.getById(draft.id) else null
+                    id = repository.saveWithSubtasks(draft, subtaskTitles)
+                } catch (error: CancellationException) { throw error }
+                catch (error: Exception) {
+                    mutableOperationError.value = error.message ?: "保存待办失败"
+                    return@launch
                 }
-                NotificationScheduler.requestReschedule(context)
-                TodoTasksWidgetProvider.refreshAll(context)
-                if (calendarSync.autoSyncEnabled()) autoSyncAfterChange()
-                onSaved(id)
-            }.onFailure { mutableOperationError.value = it.message ?: "保存待办失败" }
+                // Local persistence is complete. Later failures must never invite another save.
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) { onSaved(id) }
+                // Provider latency must not block confirming a different draft.
+                applicationScope.launch { refreshAfterSave(existing, draft, id) }
+            } finally { mutableSaving.value = false }
+        }
+    }
+
+    private suspend fun refreshAfterSave(existing: TodoItemEntity?, draft: TodoDraft, id: Long) {
+        suspend fun followUp(message: String, action: suspend () -> Unit) {
+            try { action() }
+            catch (error: CancellationException) { throw error }
+            catch (error: Exception) { mutableCalendarMessage.value = "待办已保存；$message" }
+        }
+        followUp("旧提醒清理尚未完成") {
+            androidx.core.app.NotificationManagerCompat.from(context).cancel(id.hashCode())
+        }
+        if (existing != null && (existing.calendarEventId != null || existing.calendarSyncToken != null) &&
+            (draft.dueAt == null || draft.parentId != null)) {
+            followUp("旧日历事件清理尚未完成") { calendarSync.removeIfNoLongerScheduled(id) }
+        }
+        followUp("提醒更新尚未完成") { NotificationScheduler.requestReschedule(context) }
+        followUp("组件刷新尚未完成") { TodoTasksWidgetProvider.refreshAll(context) }
+        followUp("系统日历同步尚未完成") {
+            if (calendarSync.autoSyncEnabled() && calendarSync.hasCalendarPermission()) {
+                val report = calendarSync.syncAll()
+                mutableCalendarReview.value = report.issues
+                if (report.issues.isNotEmpty()) mutableCalendarMessage.value = "待办已保存；系统日历关联需要确认"
+            }
         }
     }
 
