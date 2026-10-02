@@ -92,7 +92,9 @@ data class DayAgentFacts(
     val schedules: List<AgentScheduleSummary> = emptyList(),
     /** Device wall-clock zone captured with [now] for deterministic relative-date answers. */
     val timeZoneId: String = ZoneId.systemDefault().id,
-    val utcOffset: String = now.atZone(ZoneId.systemDefault()).offset.id
+    val utcOffset: String = now.atZone(ZoneId.systemDefault()).offset.id,
+    val scheduleConfig: ScheduleConfigEntity? = null,
+    val todos: List<com.xiaomanjun.sleepdownschedule.feature.todo.TodoItemEntity> = emptyList()
 )
 
 /** Minimal schedule descriptor exposed to the agent for multi-schedule actions. */
@@ -140,6 +142,7 @@ data class ParsedAgentCourseDraft(
 
 @Serializable
 enum class AgentActionType {
+    CREATE_TODO,
     ADD_COURSE,
     UPDATE_COURSE,
     REPLACE_COURSE,
@@ -219,6 +222,7 @@ data class AgentPeriodSettingsPatch(
 @Serializable
 data class AgentActionDraft(
     val type: AgentActionType,
+    val todo: AgentTodoDraft? = null,
     val courseId: Long? = null,
     val scope: AgentActionScope = AgentActionScope.CURRENT_WEEK,
     val sourceWeeks: List<Int>? = null,
@@ -247,6 +251,7 @@ data class AgentAdjustmentDraft(
 )
 
 enum class AgentValidatedActionType {
+    CREATE_TODO,
     ADD,
     UPDATE,
     REPLACE,
@@ -263,6 +268,7 @@ enum class AgentValidatedActionType {
 
 data class AgentValidatedAction(
     val type: AgentValidatedActionType,
+    val todo: com.xiaomanjun.sleepdownschedule.feature.todo.TodoDraft? = null,
     val original: CourseEntity? = null,
     val edited: CourseEntity? = null,
     val scope: AgentActionScope = AgentActionScope.CURRENT_WEEK,
@@ -287,7 +293,8 @@ data class AgentValidatedAction(
 
 data class ParsedAgentActions(
     val displayText: String,
-    val actions: List<AgentValidatedAction>
+    val actions: List<AgentValidatedAction>,
+    val validationIssues: List<String> = emptyList()
 )
 
 private val AgentJson = Json {
@@ -374,7 +381,8 @@ fun buildDayAgentFacts(
         scheduleAdjustments = runCatching {
             com.xiaomanjun.sleepdownschedule.domain.schedule.decodeScheduleAdjustments(config.scheduleAdjustmentsJson)
         }.getOrDefault(emptyList()),
-        schedules = schedules
+        schedules = schedules,
+        scheduleConfig = config
     )
 }
 
@@ -393,6 +401,7 @@ fun parseAgentActions(content: String, facts: DayAgentFacts): ParsedAgentActions
         .replace(Regex("```(?:json)?\\s*\\s*```", RegexOption.IGNORE_CASE), "")
         .trim()
     val actions = mutableListOf<AgentValidatedAction>()
+    val issues = mutableListOf<String>()
     legacy.course?.takeIf { payload == null }?.let { course ->
         actions += AgentValidatedAction(
             type = AgentValidatedActionType.ADD,
@@ -403,6 +412,7 @@ fun parseAgentActions(content: String, facts: DayAgentFacts): ParsedAgentActions
         )
     }
     val drafts = payload?.let(::decodeAgentActionDrafts).orEmpty()
+    if (payload != null && drafts.isEmpty() && payload.trim() != "[]") issues += "未能整理出完整内容，请重新生成。"
     val plannedTotalWeeks = drafts.singleOrNull { it.type == AgentActionType.SET_SETTING && it.settingKey.equals("TOTAL_WEEKS", true) }
         ?.settingValue?.toIntOrNull()?.takeIf { it in 1..60 } ?: facts.totalWeeks
     val destinationFacts = facts.copy(totalWeeks = plannedTotalWeeks)
@@ -417,6 +427,7 @@ fun parseAgentActions(content: String, facts: DayAgentFacts): ParsedAgentActions
     val validPeriods = requestedCount?.takeIf { it in 1..30 }?.let { (1..it).toHashSet() }
         ?: facts.periodDefinitions.mapTo(hashSetOf()) { it.periodIndex }
     drafts.forEach { rawDraft ->
+        val previousCount = actions.size
         val draft = if (rawDraft.clearFields != null) rawDraft.copy(
             course = (rawDraft.course ?: AgentCoursePatch()).let {
                 it.copy(clearFields = (it.clearFields.orEmpty() + rawDraft.clearFields).distinct())
@@ -447,6 +458,12 @@ fun parseAgentActions(content: String, facts: DayAgentFacts): ParsedAgentActions
             AgentActionScope.ALL_WEEKS -> edited
         }
         when (draft.type) {
+            AgentActionType.CREATE_TODO -> validateAgentTodo(draft.todo, facts)?.let { todo ->
+                val due = todo.dueAt?.let { java.time.Instant.ofEpochMilli(it).atZone(ZoneId.of(facts.timeZoneId)) }
+                actions += AgentValidatedAction(AgentValidatedActionType.CREATE_TODO, todo = todo,
+                    sourceScheduleId = facts.scheduleId,
+                    summary = "${todo.title} · ${due?.let { if (todo.allDay) it.toLocalDate().toString() else it.toLocalDateTime().toString().replace('T', ' ') } ?: "未安排日期"}")
+            }
             AgentActionType.ADD_COURSE -> validateAgentCoursePatch(
                 patch = draft.course,
                 base = null,
@@ -571,18 +588,24 @@ fun parseAgentActions(content: String, facts: DayAgentFacts): ParsedAgentActions
                     )
                 }
         }
+        if (actions.size == previousCount) issues += agentDraftIssue(draft)
     }
     val duplicateCourses = agentActionsHaveOverlappingCourseScopes(actions)
-    val invalidPlan = payload != null && (drafts.isEmpty() || actions.size != drafts.size || duplicateCourses ||
+    val invalidPlan = payload != null && (issues.isNotEmpty() || actions.size != drafts.size || duplicateCourses ||
+        (actions.any { it.type == AgentValidatedActionType.CREATE_TODO } && actions.any { it.type != AgentValidatedActionType.CREATE_TODO }) ||
         actions.any { action -> action.edited?.let { course ->
             course.weeks.any { it !in 1..plannedTotalWeeks } || course.weeks.none { parityMatches(course.weekParity, it) }
         } == true } ||
         AgentSettingRegistry.conflictingGroup(actions.mapNotNull { it.settingKey }) != null ||
         actions.count { it.type == AgentValidatedActionType.SET_ADJUSTMENTS } > 1 ||
         actions.count { it.type == AgentValidatedActionType.SET_PERIOD_SETTINGS } > 1)
+    val safeText = displayText.takeUnless(::containsAgentContextEcho).orEmpty()
     return if (invalidPlan) ParsedAgentActions(
-        "$displayText\n\n这份操作计划包含无效、重复或无法一起执行的项目，未执行任何修改。请让助手重新生成完整计划。".trim(), emptyList()
-    ) else ParsedAgentActions(displayText, actions.map { it.copy(sourceScheduleId = facts.scheduleId) })
+        safeText, emptyList(), issues.distinct().ifEmpty { listOf("操作包含冲突或无效范围，请重新确认。") }
+    ) else {
+        val validated = actions.map { it.copy(sourceScheduleId = facts.scheduleId) }
+        ParsedAgentActions(if (AgentPlan(validated).isCreation()) agentProposalText(validated, facts) else safeText, validated)
+    }
 }
 
 /**
@@ -634,19 +657,7 @@ private fun decodeAgentActionDrafts(payload: String): List<AgentActionDraft> {
 }
 
 private fun extractLooseAgentActionPayload(content: String): String? {
-    if (!Regex("\\\"type\\\"\\s*:\\s*\\\"(?:ADD_COURSE|UPDATE_COURSE|REPLACE_COURSE|DELETE_COURSE|OPEN_SETTINGS|OPEN_IMPORT|SET_SETTING|SET_PERIOD_SETTINGS|SET_ADJUSTMENTS|CREATE_SCHEDULE|ACTIVATE_SCHEDULE|DELETE_SCHEDULE)", RegexOption.IGNORE_CASE)
-            .containsMatchIn(content)) return null
-    val fenced = Regex("```(?:json)?\\s*([\\s\\S]*?)```", RegexOption.IGNORE_CASE)
-        .findAll(content)
-        .map { it.groupValues[1] }
-        .firstOrNull { it.contains("\"type\"", ignoreCase = true) }
-    if (fenced != null) return fenced
-    val arrayStart = content.indexOf('[')
-    val arrayEnd = content.lastIndexOf(']')
-    if (arrayStart >= 0 && arrayEnd > arrayStart) return content.substring(arrayStart, arrayEnd + 1)
-    val objectStart = content.indexOf('{')
-    val objectEnd = content.lastIndexOf('}')
-    return if (objectStart >= 0 && objectEnd > objectStart) content.substring(objectStart, objectEnd + 1) else null
+    return looseAgentActionPayload(content)
 }
 
 private fun normalizeLooseAgentActionJson(raw: String): String {

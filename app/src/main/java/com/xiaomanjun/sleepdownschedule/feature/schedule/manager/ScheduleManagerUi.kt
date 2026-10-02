@@ -10,6 +10,7 @@ import com.xiaomanjun.sleepdownschedule.feature.home.day.*
 import com.xiaomanjun.sleepdownschedule.feature.home.week.*
 
 import com.xiaomanjun.sleepdownschedule.core.wallpaper.*
+import com.xiaomanjun.sleepdownschedule.core.performance.*
 import com.xiaomanjun.sleepdownschedule.feature.importing.*
 
 import android.content.ClipData
@@ -186,6 +187,9 @@ fun ScheduleManagerScreen(
     val profiles = state.schedules.ifEmpty {
         listOf(ScheduleProfileEntity(id = 1, name = "默认课表", isActive = true))
     }
+    val wallpaperImages by rememberHomeWallpaperImages(state.config)
+    val expectedWallpaperKey = homeWallpaperRenderKey(state.config, appUsesDarkTheme(state.config))
+    val noWallpaperResolved = wallpaperImages.renderKey == expectedWallpaperKey && wallpaperImages.source == null
     val activeIndex = profiles.indexOfFirst { it.isActive }.takeIf { it >= 0 } ?: 0
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = activeIndex)
     val flingBehavior = rememberSnapFlingBehavior(lazyListState = listState)
@@ -281,15 +285,29 @@ fun ScheduleManagerScreen(
     Box(
         Modifier
             .fillMaxSize()
-            .background(Color.Black)
+            .background(Color.White)
             .glassBackdropProducer(sceneBackdrop)
     ) {
         Box(
             Modifier
                 .fillMaxSize()
-                .background(Color.Black)
                 .glassBackdropProducer(backgroundBackdrop)
-        )
+        ) {
+            if (wallpaperImages.source != null) {
+                HomeWallpaper(
+                    config = state.config,
+                    images = wallpaperImages,
+                    phase = StartupPhase.FullQuality,
+                    isActive = true
+                )
+                WallpaperGlassSamplingToneOverlay(state.config)
+            } else {
+                HomeBackdropFallback(
+                    noWallpaper = !state.config.hasAnyWallpaper() || noWallpaperResolved
+                )
+            }
+        }
+        if (wallpaperImages.source != null) WallpaperToneOverlay(state.config)
 
         Box(
             modifier = Modifier
@@ -544,7 +562,7 @@ fun ScheduleManagerScreen(
                 }
             ),
             backdrop = sceneBackdrop,
-            config = settingsVisualConfig(state.config),
+            config = state.config,
             onDismissRequest = { deleteCandidate = null }
         )
     }
@@ -553,7 +571,7 @@ fun ScheduleManagerScreen(
         ScheduleRenameDialog(
             profile = profile,
             backdrop = sceneBackdrop,
-            config = settingsVisualConfig(state.config),
+            config = state.config,
             onCancel = { renameCandidate = null },
             onSave = { name ->
                 onRename(profile.id, name)
@@ -565,7 +583,7 @@ fun ScheduleManagerScreen(
     if (showShareOptions) {
         LiquidAlertDialog(
             title = "分享课表",
-            message = "选择分享 SleepDown 课表口令，或导出可被日历应用识别的 ICS 文件。随后可在系统分享器中选择发送或保存。",
+            message = "选择分享 时序清单 课表口令，或导出可被日历应用识别的 ICS 文件。随后可在系统分享器中选择发送或保存。",
             actions = listOf(
                 LiquidAlertAction("分享课表口令", LiquidAlertActionStyle.Primary) {
                     showShareOptions = false
@@ -595,7 +613,7 @@ fun ScheduleManagerScreen(
                 LiquidAlertAction("取消", LiquidAlertActionStyle.Secondary) { showShareOptions = false }
             ),
             backdrop = sceneBackdrop,
-            config = settingsVisualConfig(state.config),
+            config = state.config,
             onDismissRequest = { showShareOptions = false }
         )
     }
@@ -604,7 +622,7 @@ fun ScheduleManagerScreen(
 internal fun shareScheduleToken(context: Context, scheduleName: String, token: String) {
     val intent = Intent(Intent.ACTION_SEND).apply {
         type = "text/plain"
-        putExtra(Intent.EXTRA_SUBJECT, "$scheduleName - SleepDown 课表口令")
+        putExtra(Intent.EXTRA_SUBJECT, "$scheduleName - 时序清单 课表口令")
         putExtra(Intent.EXTRA_TEXT, token)
     }
     context.startActivity(Intent.createChooser(intent, "分享课表口令"))
@@ -614,9 +632,9 @@ internal fun shareScheduleIcs(context: Context, scheduleName: String, file: java
     val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
     val intent = Intent(Intent.ACTION_SEND).apply {
         type = "text/calendar"
-        putExtra(Intent.EXTRA_SUBJECT, "$scheduleName - SleepDown 课表")
+        putExtra(Intent.EXTRA_SUBJECT, "$scheduleName - 时序清单 课表")
         putExtra(Intent.EXTRA_STREAM, uri)
-        clipData = ClipData.newRawUri("SleepDown ICS 课表", uri)
+        clipData = ClipData.newRawUri("时序清单 ICS 课表", uri)
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
     context.startActivity(Intent.createChooser(intent, "分享或保存 ICS 课表"))

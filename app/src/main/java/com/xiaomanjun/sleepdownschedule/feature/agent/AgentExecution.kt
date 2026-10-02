@@ -116,6 +116,7 @@ internal fun previewAgentPlan(
             }
 
             AgentValidatedActionType.OPEN_SETTINGS,
+            AgentValidatedActionType.CREATE_TODO,
             AgentValidatedActionType.OPEN_IMPORT,
             AgentValidatedActionType.SET_SETTING,
             AgentValidatedActionType.SET_PERIOD_SETTINGS,
@@ -191,6 +192,7 @@ internal fun verifyAgentPlan(
         } ?: false
 
         AgentValidatedActionType.OPEN_SETTINGS,
+        AgentValidatedActionType.CREATE_TODO,
         AgentValidatedActionType.OPEN_IMPORT,
         AgentValidatedActionType.SET_SETTING,
         AgentValidatedActionType.SET_PERIOD_SETTINGS,

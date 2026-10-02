@@ -91,7 +91,7 @@ fun BackupRestoreSettingsScreen(
 
     val exportLauncher = rememberLauncherForActivityResult(
         // A generic octet-stream makes some OEM document providers force a `.bin` suffix even
-        // when the suggested display name ends in `.sleepdown`.
+        // when the suggested display name ends in the application's backup extension.
         contract = ActivityResultContracts.CreateDocument(BackupDocumentMimeType)
     ) { destination ->
         if (destination == null) return@rememberLauncherForActivityResult
@@ -132,45 +132,13 @@ fun BackupRestoreSettingsScreen(
         ),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        item(key = "backup-scope") {
-            BackupGuideCarousel(
-                sectionTitle = "会备份什么",
-                pages = listOf(
-                    BackupGuidePage(
-                        R.drawable.ic_material_event,
-                        "全部课表与课程",
-                        "保存全部课表、课程、上课周数、节次时间，以及你调整过的作息。",
-                        tint = Color(0xFF4B8DFF)
-                    ),
-                    BackupGuidePage(
-                        R.drawable.ic_material_settings_backup_restore,
-                        "个性化设置",
-                        "保存卡片样式、深色模式、首页、课程提醒、AI助理、AI 服务选项和小组件样式。",
-                        tint = Color(0xFF8C78E8)
-                    ),
-                    BackupGuidePage(
-                        R.drawable.ic_material_photo_library,
-                        "图片与导入记录",
-                        "保存正在使用的课表和小组件壁纸、助手图片，以及 AI 导入记录。",
-                        tint = Color(0xFF39A89A)
-                    ),
-                    BackupGuidePage(
-                        R.drawable.ic_material_verified_user,
-                        "敏感信息留在本机",
-                        "API Key、教务登录状态和系统权限不会进入备份。备份文件没有加密，请不要发送给他人。",
-                        tint = Color(0xFFE09B3F)
-                    )
-                ),
-                backdrop = backdrop,
-                config = state.config
-            )
-        }
+        // Keep the two actions directly accessible; the restore preview owns file details.
         item(key = "backup-actions") {
             GlassPreferenceSection("保存或恢复") {
                 SettingsGroup(backdrop = backdrop, config = state.config, modifier = Modifier.fillMaxWidth()) {
                     SettingsActionRow(
                         title = "保存当前数据",
-                        subtitle = "把上面的内容保存成一个 .sleepdown 备份文件",
+                        subtitle = "将当前数据保存为 .shixu 备份文件",
                         buttonText = "保存",
                         iconRes = R.drawable.ic_share_schedule,
                         backdrop = backdrop,
@@ -256,7 +224,7 @@ fun BackupRestorePreviewScreen(
         }.onFailure { error ->
             showFailure(
                 title = "无法读取这份备份",
-                guidance = "它可能不是 SleepDown 备份、文件不完整，或来自暂不支持的版本；你现有的数据没有变化",
+                guidance = "它可能不是时序清单备份、文件不完整，或来自暂不支持的版本；你现有的数据没有变化",
                 error = error
             )
         }
@@ -287,7 +255,7 @@ fun BackupRestorePreviewScreen(
             }.onFailure { error ->
                 showFailure(
                     title = "恢复没有完成",
-                    guidance = "请重新打开 SleepDown 查看结果；如果恢复已经开始，应用会自动继续处理未完成的步骤",
+                    guidance = "请重新打开时序清单查看结果；如果恢复已经开始，应用会自动继续处理未完成的步骤",
                     error = error
                 )
             }
@@ -431,7 +399,7 @@ private fun BackupPreviewContent(
         BackupGuidePage(
             R.drawable.ic_material_restore,
             "备份来源",
-            "来自 SleepDown ${report.sourceAppVersionName}，保存于 ${formatBackupCreatedAt(report.createdAt)}。",
+            "应用版本 ${report.sourceAppVersionName}，保存于 ${formatBackupCreatedAt(report.createdAt)}。",
             tint = Color(0xFF4F8EE8)
         ),
         BackupGuidePage(
@@ -610,7 +578,7 @@ private fun formatBackupCreatedAt(value: String): String = runCatching {
 }.getOrDefault(value)
 
 private fun defaultBackupFileName(): String =
-    "SleepDown-Backup-${SimpleDateFormat("yyyyMMdd-HHmm", Locale.US).format(Date())}.sleepdown"
+    "时序清单-备份-${SimpleDateFormat("yyyyMMdd-HHmm", Locale.US).format(Date())}.${BackupFormatV1.FILE_EXTENSION}"
 
 private fun backupAssetPurposeLabel(purpose: String): String = when (purpose) {
     BackupAssetPurpose.SCHEDULE_WALLPAPER -> "课表壁纸"
@@ -631,4 +599,4 @@ private fun userFacingBackupWarning(warning: BackupImportWarning): String = when
         warning.message
 }
 
-private const val BackupDocumentMimeType = "application/vnd.sleepdown"
+private const val BackupDocumentMimeType = BackupFormatV1.MIME_TYPE

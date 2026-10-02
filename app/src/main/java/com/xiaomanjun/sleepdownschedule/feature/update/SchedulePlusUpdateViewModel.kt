@@ -15,7 +15,7 @@ internal data class SchedulePlusUpdateUiState(
     val channel: SchedulePlusUpdateChannel = SchedulePlusUpdateChannel.STABLE,
     val isChecking: Boolean = false,
     val isDownloading: Boolean = false,
-    val message: String = "手动检查课表+自有 GitHub Release",
+    val message: String = "手动检查时序清单的 GitHub Release",
     val update: SchedulePlusUpdate? = null,
     val downloadedApkPath: String? = null
 )

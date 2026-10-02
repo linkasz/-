@@ -61,7 +61,7 @@ class TodoTasksWidgetProvider : AppWidgetProvider() {
     ) {
         if (ids.isEmpty()) return
         val app = context.applicationContext as CourseScheduleApp
-        val tasks = app.database.todoDao().getAllItems()
+        val tasks = app.database.todoDao().getActiveItems()
             .asSequence()
             .filter { !it.isCompleted && it.parentId == null }
             .sortedWith(
@@ -142,7 +142,7 @@ class TodoTasksWidgetProvider : AppWidgetProvider() {
         action: String,
         startNewTask: Boolean
     ): PendingIntent {
-        val intent = Intent(context, TodoActivity::class.java)
+        val intent = Intent(context, com.xiaomanjun.sleepdownschedule.MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
             .setData(Uri.parse("scheduleplus://todo-widget/$widgetId/$action"))
         if (startNewTask) intent.putExtra(TodoQuickCaptureContract.EXTRA_START_NEW_TASK, true)

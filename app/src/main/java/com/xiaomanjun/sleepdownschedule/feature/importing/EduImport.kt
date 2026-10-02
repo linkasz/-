@@ -127,7 +127,7 @@ fun aiEduImportAdapter(): EduAdapter = EduAdapter(
     category = "AI_EDU",
     assetJsPath = "",
     importUrl = "",
-    maintainer = "SleepDown",
+    maintainer = "时序清单",
     description = "打开学校教务系统课表页后，使用 AI 解析当前页面内容。"
 )
 

@@ -505,8 +505,12 @@ private val MIGRATION_33_34 = object : Migration(33, 34) {
 
 private val MIGRATION_34_35 = object : Migration(34, 35) {
     override fun migrate(db: SupportSQLiteDatabase) {
-        db.execSQL("ALTER TABLE schedule_config ADD COLUMN homeChromeBlurScale REAL NOT NULL DEFAULT 1")
-        db.execSQL("ALTER TABLE schedule_config ADD COLUMN homeChromeSamplingScale REAL NOT NULL DEFAULT 1")
+        if (!db.hasColumn("schedule_config", "homeChromeBlurScale")) {
+            db.execSQL("ALTER TABLE schedule_config ADD COLUMN homeChromeBlurScale REAL NOT NULL DEFAULT 1")
+        }
+        if (!db.hasColumn("schedule_config", "homeChromeSamplingScale")) {
+            db.execSQL("ALTER TABLE schedule_config ADD COLUMN homeChromeSamplingScale REAL NOT NULL DEFAULT 1")
+        }
     }
 }
 
@@ -681,6 +685,43 @@ private val MIGRATION_42_43 = object : Migration(42, 43) {
     }
 }
 
+private val MIGRATION_43_44 = object : Migration(43, 44) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE todo_items ADD COLUMN calendarSyncToken TEXT")
+        db.execSQL("ALTER TABLE todo_items ADD COLUMN calendarSyncState TEXT NOT NULL DEFAULT 'PENDING'")
+        db.execSQL("""
+            UPDATE todo_items
+            SET calendarSyncToken = lower(hex(randomblob(16))),
+                calendarSyncState = 'LINKED'
+            WHERE calendarEventId IS NOT NULL
+        """.trimIndent())
+        db.query("SELECT calendarSyncToken, calendarEventId FROM todo_items WHERE calendarEventId IS NOT NULL").use { cursor ->
+            val tokenIndex = cursor.getColumnIndexOrThrow("calendarSyncToken")
+            val eventIdIndex = cursor.getColumnIndexOrThrow("calendarEventId")
+            while (cursor.moveToNext()) {
+                CalendarEventLocalIdStore.put(cursor.getString(tokenIndex), cursor.getLong(eventIdIndex))
+            }
+        }
+        db.execSQL("UPDATE todo_items SET calendarEventId = NULL WHERE calendarEventId IS NOT NULL")
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_todo_items_calendarSyncToken ON todo_items(calendarSyncToken)")
+    }
+}
+
+private val MIGRATION_44_45 = object : Migration(44, 45) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE todo_items ADD COLUMN endAt INTEGER")
+        db.execSQL("ALTER TABLE todo_items ADD COLUMN reminderMode TEXT NOT NULL DEFAULT 'LEGACY'")
+        db.execSQL("ALTER TABLE todo_items ADD COLUMN reminderOffsetMinutes INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE todo_items ADD COLUMN reminderTimeMinutes INTEGER NOT NULL DEFAULT 480")
+        db.execSQL("ALTER TABLE todo_items ADD COLUMN persistentReminder INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE todo_items ADD COLUMN strongReminder INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE todo_items ADD COLUMN deletedAt INTEGER")
+        db.execSQL("ALTER TABLE todo_items ADD COLUMN deletionBatch TEXT")
+        db.execSQL("UPDATE todo_items SET groupId = NULL WHERE groupId IN (SELECT id FROM todo_groups WHERE name = '收件箱')")
+        db.execSQL("DELETE FROM todo_groups WHERE name = '收件箱'")
+    }
+}
+
 internal val APP_DATABASE_MIGRATIONS: List<Migration> = listOf(
     MIGRATION_1_2,
     MIGRATION_2_3,
@@ -723,7 +764,9 @@ internal val APP_DATABASE_MIGRATIONS: List<Migration> = listOf(
     MIGRATION_39_40,
     MIGRATION_40_41,
     MIGRATION_41_42,
-    MIGRATION_42_43
+    MIGRATION_42_43,
+    MIGRATION_43_44,
+    MIGRATION_44_45
 )
 
 private fun addWallpaperCropColumns(db: SupportSQLiteDatabase) {
@@ -741,6 +784,7 @@ internal fun createAppDatabase(
     context: Context,
     databaseName: String = "course_schedule.db"
 ): AppDatabase {
+    CalendarEventLocalIdStore.initialize(context)
     repairDatabaseFileBeforeRoomOpen(context.getDatabasePath(databaseName))
     return Room.databaseBuilder(context, AppDatabase::class.java, databaseName)
         .addMigrations(*APP_DATABASE_MIGRATIONS.toTypedArray())

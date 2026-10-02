@@ -12,14 +12,13 @@ fun todayCourses(state: AppState): List<CourseEntity> {
     return coursesForDate(state, LocalDate.now())
 }
 
-fun coursesForDate(state: AppState, date: LocalDate): List<CourseEntity> {
-    if (scheduleWeekForDateOrNull(state.config, date) == null) return emptyList()
+fun coursesForDate(state: AppState, date: LocalDate, today: LocalDate = LocalDate.now()): List<CourseEntity> {
+    if (adjustedTeachingWeekForDate(state.config, date, today) == null) return emptyList()
     val teachingDate = teachingDateForSchedule(state.config, date) ?: return emptyList()
     val weekday = teachingDate.dayOfWeek.toChineseWeekday()
     // Do not fold dates before/after the term into week 1/the final week. Widgets,
     // notifications and the live activity all consume this shared query.
-    val currentWeek = (if (teachingDate != date) adjustedTeachingWeekForDate(state.config, teachingDate)
-        else scheduleWeekForDateOrNull(state.config, teachingDate)) ?: return emptyList()
+    val currentWeek = adjustedTeachingWeekForDate(state.config, teachingDate, today) ?: return emptyList()
     return state.courses.filter { it.weekday == weekday && it.weeks.contains(currentWeek) && parityMatches(it.weekParity, currentWeek) }
         .sortedBy { courseStartTime(it, state.periods) ?: LocalTime.MAX }
 }

@@ -276,7 +276,9 @@ private fun LiquidGlassDockPreview(
                     previewMode = true,
                     onHome = {},
                     onConfig = {},
-                    onTodos = {}
+                    onTodos = {},
+                    onCalendar = {},
+                    onInsights = {}
                 )
             }
         }

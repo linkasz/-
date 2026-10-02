@@ -14,6 +14,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -26,13 +27,20 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.toggleableState
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastCoerceIn
 import androidx.compose.ui.util.lerp
+import kotlin.math.abs
+import kotlin.math.sign
 import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.backdrops.rememberBackdrop
 import com.kyant.backdrop.catalog.utils.DampedDragAnimation
@@ -54,13 +62,20 @@ import com.xiaomanjun.sleepdownschedule.glass.rememberGlassSurfaceDescriptor
 import com.xiaomanjun.sleepdownschedule.glass.sleepDownGlassSurface
 import kotlinx.coroutines.flow.collectLatest
 
+internal fun liquidToggleReleaseTarget(
+    didDrag: Boolean,
+    dragFraction: Float,
+    currentTarget: Boolean
+): Boolean = if (didDrag) dragFraction >= 0.5f else !currentTarget
+
 @Composable
 fun LiquidToggle(
     selected: () -> Boolean,
     onSelect: (Boolean) -> Unit,
     backdrop: Backdrop,
     modifier: Modifier = Modifier,
-    compact: Boolean = false
+    compact: Boolean = false,
+    enabled: Boolean = true
 ) {
     val isLightTheme = !isSystemInDarkTheme()
     val accentColor =
@@ -72,13 +87,20 @@ fun LiquidToggle(
 
     val density = LocalDensity.current
     val isLtr = LocalLayoutDirection.current == LayoutDirection.Ltr
+    val touchSlopPx = LocalViewConfiguration.current.touchSlop
     val trackWidth = if (compact) 52.dp else 64.dp
     val trackHeight = if (compact) 24.dp else 28.dp
     val thumbWidth = if (compact) 32.dp else 40.dp
     val thumbHeight = if (compact) 20.dp else 24.dp
     val dragWidth = with(density) { (trackWidth - thumbWidth - 4.dp).toPx() }
     val animationScope = rememberCoroutineScope()
+    val latestSelected = rememberUpdatedState(selected)
+    val latestOnSelect = rememberUpdatedState(onSelect)
+    val latestEnabled = rememberUpdatedState(enabled)
     var didDrag by remember { mutableStateOf(false) }
+    var horizontalDrag by remember { mutableStateOf(false) }
+    var accumulatedDragX by remember { mutableFloatStateOf(0f) }
+    var accumulatedDragY by remember { mutableFloatStateOf(0f) }
     var fraction by remember { mutableFloatStateOf(if (selected()) 1f else 0f) }
     var targetSelected by remember { mutableStateOf(selected()) }
     val dampedDragAnimation = remember(animationScope, compact, dragWidth, isLtr) {
@@ -89,27 +111,55 @@ fun LiquidToggle(
             visibilityThreshold = 0.001f,
             initialScale = 1f,
             pressedScale = if (compact) 1.2f else 1.5f,
-            onDragStarted = {},
+            onDragStarted = {
+                didDrag = false
+                horizontalDrag = false
+                accumulatedDragX = 0f
+                accumulatedDragY = 0f
+            },
             onDragStopped = {
-                if (didDrag) {
-                    fraction = if (targetValue >= 0.5f) 1f else 0f
-                    targetSelected = fraction == 1f
-                    onSelect(targetSelected)
-                    didDrag = false
+                targetSelected = if (latestEnabled.value) {
+                    liquidToggleReleaseTarget(didDrag, fraction, targetSelected)
                 } else {
-                    targetSelected = !targetSelected
-                    fraction = if (targetSelected) 1f else 0f
-                    onSelect(targetSelected)
+                    latestSelected.value()
                 }
+                fraction = if (targetSelected) 1f else 0f
+                if (latestEnabled.value) latestOnSelect.value(targetSelected)
+                didDrag = false
+                horizontalDrag = false
+                accumulatedDragX = 0f
+                accumulatedDragY = 0f
+            },
+            onDragCancelled = {
+                targetSelected = latestSelected.value()
+                fraction = if (targetSelected) 1f else 0f
+                didDrag = false
+                horizontalDrag = false
+                accumulatedDragX = 0f
+                accumulatedDragY = 0f
+                animateToValue(fraction)
             },
             onDrag = { _, dragAmount ->
-                if (!didDrag) {
-                    didDrag = dragAmount.x != 0f
+                if (latestEnabled.value) {
+                    val nextAccumulatedX = accumulatedDragX + dragAmount.x
+                    val nextAccumulatedY = accumulatedDragY + dragAmount.y
+                    if (!didDrag && maxOf(abs(nextAccumulatedX), abs(nextAccumulatedY)) > touchSlopPx) {
+                        didDrag = true
+                        horizontalDrag = abs(nextAccumulatedX) > abs(nextAccumulatedY)
+                        if (horizontalDrag) {
+                            val beyondSlop = nextAccumulatedX - sign(nextAccumulatedX) * touchSlopPx
+                            fraction = (fraction + (if (isLtr) beyondSlop else -beyondSlop) / dragWidth)
+                                .fastCoerceIn(0f, 1f)
+                        }
+                    } else if (didDrag && horizontalDrag) {
+                        val delta = dragAmount.x / dragWidth
+                        fraction =
+                            if (isLtr) (fraction + delta).fastCoerceIn(0f, 1f)
+                            else (fraction - delta).fastCoerceIn(0f, 1f)
+                    }
+                    accumulatedDragX = nextAccumulatedX
+                    accumulatedDragY = nextAccumulatedY
                 }
-                val delta = dragAmount.x / dragWidth
-                fraction =
-                    if (isLtr) (fraction + delta).fastCoerceIn(0f, 1f)
-                    else (fraction - delta).fastCoerceIn(0f, 1f)
             }
         )
     }
@@ -119,12 +169,12 @@ fun LiquidToggle(
                 dampedDragAnimation.updateValue(fraction)
             }
     }
-    LaunchedEffect(selected) {
-        snapshotFlow { selected() }
+    LaunchedEffect(dampedDragAnimation) {
+        snapshotFlow { latestSelected.value() }
             .collectLatest { isSelected ->
                 targetSelected = isSelected
                 val target = if (isSelected) 1f else 0f
-                if (target != fraction) {
+                if (kotlin.math.abs(target - dampedDragAnimation.value) > 0.001f) {
                     fraction = target
                     dampedDragAnimation.animateToValue(target)
                 }
@@ -158,7 +208,25 @@ fun LiquidToggle(
     )
 
     Box(
-        modifier,
+        modifier
+            // The visual thumb is narrower than the track. Attach the gesture to the full
+            // switch bounds so taps on either end of the track behave like a native switch.
+            .then(dampedDragAnimation.modifier)
+            .semantics {
+                role = Role.Switch
+                toggleableState = if (latestSelected.value()) {
+                    androidx.compose.ui.state.ToggleableState.On
+                } else {
+                    androidx.compose.ui.state.ToggleableState.Off
+                }
+                stateDescription = if (latestSelected.value()) "已开启" else "已关闭"
+                if (!latestEnabled.value) disabled()
+                onClick(label = "切换开关") {
+                    if (!latestEnabled.value) return@onClick false
+                    latestOnSelect.value(!latestSelected.value())
+                    true
+                }
+            },
         contentAlignment = Alignment.CenterStart
     ) {
         Box(
@@ -181,10 +249,6 @@ fun LiquidToggle(
                         if (isLtr) lerp(padding, padding + dragWidth, fraction)
                         else lerp(-padding, -(padding + dragWidth), fraction)
                 }
-                .semantics {
-                    role = Role.Switch
-                }
-                .then(dampedDragAnimation.modifier)
                 .sleepDownGlassSurface(
                     backdrop = rememberGlassCombinedBackdrop(
                         backdrop,

@@ -24,6 +24,44 @@ import java.util.zip.ZipOutputStream
 import java.util.zip.CRC32
 
 class BackupCodecTest {
+    @Test fun businessPersonaLibraryRoundTripsWithoutThePrivatePromptDefinition() {
+        val source = fixtureArchive()
+        val library = com.xiaomanjun.sleepdownschedule.feature.agent.PersonaLibrary(listOf(
+            com.xiaomanjun.sleepdownschedule.feature.agent.PersonaCard(
+                com.xiaomanjun.sleepdownschedule.feature.agent.PersonaMeta("custom", "小序"), "温柔简洁的业务表达")
+        ), "custom").validated()
+        val raw = Json.encodeToString(library)
+        val updated = source.copy(preferences = source.preferences.copy(dayAgent = source.preferences.dayAgent!!.copy(personaLibraryJson = raw)))
+        val restored = BackupCodec.decode(BackupCodec.encode(updated))
+        assertEquals(raw, restored.preferences.dayAgent!!.personaLibraryJson)
+        assertFalse(raw.contains("corePrompt"))
+        val oldJson = Json.encodeToString(source.preferences.dayAgent!!)
+        assertEquals("", Json.decodeFromString<BackupDayAgentPreferences>(oldJson).personaLibraryJson)
+        val forbidden = updated.copy(preferences = updated.preferences.copy(dayAgent = updated.preferences.dayAgent!!.copy(
+            personaLibraryJson = raw.dropLast(1) + ",\"corePrompt\":\"forbidden\"}")))
+        org.junit.Assert.assertThrows(Exception::class.java) { BackupCodec.encode(forbidden) }
+    }
+    @Test
+    fun brandedArchivesAndLegacyArchivesBothRestoreWithTheSameV1Data() {
+        val entries = zipEntries(BackupCodec.encode(fixtureArchive()))
+        val manifest = entries.getValue(BackupFormatV1.MANIFEST_ENTRY).toString(StandardCharsets.UTF_8)
+        assertTrue(manifest.contains(BackupFormatV1.PRODUCT))
+        assertFalse(manifest.contains(BackupFormatV1.LEGACY_PRODUCT))
+        val current = BackupCodec.decode(zipEntriesToBytes(entries))
+        entries[BackupFormatV1.MANIFEST_ENTRY] = manifest.replace(BackupFormatV1.PRODUCT,
+            BackupFormatV1.LEGACY_PRODUCT).toByteArray(StandardCharsets.UTF_8)
+        val checksums = BackupJson.decodeFromString<BackupChecksums>(entries.getValue(BackupFormatV1.CHECKSUMS_ENTRY)
+            .toString(StandardCharsets.UTF_8))
+        entries[BackupFormatV1.CHECKSUMS_ENTRY] = BackupJson.encodeToString(checksums.copy(
+            entries = checksums.entries + (BackupFormatV1.MANIFEST_ENTRY to sha256(entries.getValue(BackupFormatV1.MANIFEST_ENTRY)))
+        )).toByteArray(StandardCharsets.UTF_8)
+        val legacy = BackupCodec.decode(zipEntriesToBytes(entries))
+        assertEquals(current.data, legacy.data)
+        assertEquals(current.preferences, legacy.preferences)
+        assertEquals("shixu", BackupFormatV1.FILE_EXTENSION)
+        assertEquals("application/vnd.shixu", BackupFormatV1.MIME_TYPE)
+    }
+
     @Test
     fun roundTripIncludesAdjustmentsAndWeekAssistantPreference() {
         val source = fixtureArchive()
@@ -48,6 +86,7 @@ class BackupCodecTest {
         val groupId = BackupStableId.new(BackupStableId.TODO_GROUP_PREFIX)
         val parentId = BackupStableId.new(BackupStableId.TODO_PREFIX)
         val childId = BackupStableId.new(BackupStableId.TODO_PREFIX)
+        assertTrue(BackupStableId.isValid(groupId, BackupStableId.TODO_GROUP_PREFIX))
         val courseId = source.data.schedules.first().courses.first().id
         val todos = listOf(
             BackupTodoItem(
@@ -107,6 +146,16 @@ class BackupCodecTest {
         val serialized = BackupJson.encodeToString(fixtureConfig("asset_550e8400-e29b-41d4-a716-446655440000"))
         val old = serialized.replace(Regex(",?\\\"scheduleAdjustmentsJson\\\":\\\"\\\""), "")
         assertEquals("", BackupJson.decodeFromString<BackupScheduleConfig>(old).scheduleAdjustmentsJson)
+    }
+
+    @Test
+    fun legacyTodoWithoutCalendarMetadataStillDecodes() {
+        val legacyJson = """{"id":"todo_550e8400-e29b-41d4-a716-446655440000","title":"旧任务","description":"","dueAt":1800000000000,"allDay":false,"priority":1,"isCompleted":false,"isPinned":false,"groupId":null,"parentId":null,"courseId":null,"repeatRule":"NONE","createdAt":1,"updatedAt":1,"completedAt":null}"""
+
+        val todo = BackupJson.decodeFromString<BackupTodoItem>(legacyJson)
+
+        assertEquals(null, todo.calendarSyncToken)
+        assertEquals(null, todo.calendarSyncState)
     }
 
     @Test

@@ -41,6 +41,11 @@ import com.xiaomanjun.sleepdownschedule.feature.backup.*
 import com.xiaomanjun.sleepdownschedule.feature.widget.*
 import com.xiaomanjun.sleepdownschedule.feature.agent.*
 import com.xiaomanjun.sleepdownschedule.feature.agent.background.*
+import com.xiaomanjun.sleepdownschedule.feature.todo.TodoChromeActions
+import com.xiaomanjun.sleepdownschedule.feature.todo.TodoEntryRequest
+import com.xiaomanjun.sleepdownschedule.feature.todo.TodoEntryRequestSaver
+import com.xiaomanjun.sleepdownschedule.feature.todo.TodoPage
+import com.xiaomanjun.sleepdownschedule.feature.todo.TodoPlusScreen
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -80,6 +85,7 @@ import android.view.HapticFeedbackConstants
 import android.view.WindowInsetsController
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import android.widget.ImageView
 import androidx.annotation.RequiresApi
 import androidx.browser.customtabs.CustomTabsClient
 import androidx.browser.customtabs.CustomTabsIntent
@@ -98,6 +104,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
@@ -144,6 +152,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.updateTransition
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Image
@@ -156,6 +165,7 @@ import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
@@ -182,6 +192,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.statusBarsIgnoringVisibility
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.LazyColumn
@@ -229,15 +240,18 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 
@@ -278,12 +292,14 @@ import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.layout.positionOnScreen
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.zIndex
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
@@ -310,7 +326,6 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.palette.graphics.Palette
 import androidx.core.content.ContextCompat
 import org.json.JSONArray
@@ -428,10 +443,57 @@ private fun android.view.Window.setStatusBarDarkIcons(darkIcons: Boolean) {
 
 sealed interface Screen {
     data object Home : Screen
+    data object TodoTasks : Screen
+    data object TodoCalendar : Screen
+    data object TodoInsights : Screen
     data object Config : Screen
 }
 
+private val ScreenSaver = Saver<Screen, String>(
+    save = { screen -> when (screen) {
+        Screen.Home -> "home"
+        Screen.TodoTasks -> "todo_tasks"
+        Screen.TodoCalendar -> "todo_calendar"
+        Screen.TodoInsights -> "todo_insights"
+        Screen.Config -> "settings"
+    } },
+    restore = { value -> when (value) {
+        "todo_tasks" -> Screen.TodoTasks
+        "todo_calendar" -> Screen.TodoCalendar
+        "todo_insights" -> Screen.TodoInsights
+        "settings" -> Screen.Config
+        else -> Screen.Home
+    } }
+)
+
+private fun Screen.isTodoDestination(): Boolean =
+    this is Screen.TodoTasks || this is Screen.TodoCalendar || this is Screen.TodoInsights
+
+internal fun Screen.dockIndex(): Int = when (this) {
+    Screen.Home -> 0
+    Screen.TodoTasks -> 1
+    Screen.TodoCalendar -> 2
+    Screen.TodoInsights -> 3
+    Screen.Config -> 4
+}
+
+private fun Screen.todoPage(): TodoPage? = when (this) {
+    Screen.TodoTasks -> TodoPage.Tasks
+    Screen.TodoCalendar -> TodoPage.Calendar
+    Screen.TodoInsights -> TodoPage.Insights
+    else -> null
+}
+
+private fun TodoPage.toScreen(): Screen = when (this) {
+    TodoPage.Tasks -> Screen.TodoTasks
+    TodoPage.Calendar -> Screen.TodoCalendar
+    TodoPage.Insights -> Screen.TodoInsights
+}
+
 enum class HomeMode { Day, Week }
+internal fun homeModeAtFraction(fraction: Float): HomeMode =
+    HomeMode.entries[((fraction.coerceIn(0f, 1f) * HomeMode.entries.size).toInt())
+        .coerceIn(HomeMode.entries.indices)]
 internal fun HomeStartMode.toHomeMode(): HomeMode = when (this) {
     HomeStartMode.DAY,
     HomeStartMode.TWO_DAY -> HomeMode.Day
@@ -493,7 +555,7 @@ private fun agentSettingsPage(value: String?): SettingsPage? = when (value) {
     else -> null
 }
 
-private const val SettingsDetailPageExtra = "settings_page"
+internal const val SettingsDetailPageExtra = "settings_page"
 private const val BackupPreviewUriExtra = "backup_preview_uri"
 private const val EduAdapterExtra = "edu_adapter"
 
@@ -568,6 +630,8 @@ internal val HomeLightGlassSurfaceColor = ComposeColor(0xFFF2F4F8)
 internal val HomeLightGlassGradientColor = ComposeColor(0xFFF7F8FB)
 internal val HomeLightGlassAccentColor = ComposeColor(0xFF0A84FF)
 internal val HomeLightGlassSelectedAccentColor = ComposeColor(0xFF006FD6)
+internal fun dockSelectedAccentColor(lightGlass: Boolean): ComposeColor =
+    if (lightGlass) HomeLightGlassSelectedAccentColor else ComposeColor(0xFF0091FF)
 internal const val HomeLightGlassChromeTintAlpha = 0.54f
 internal const val HomeLightGlassAccentTintAlpha = 0.24f
 internal const val HomeLightGlassPanelTintAlpha = 0.15f
@@ -699,6 +763,12 @@ internal var hideFromRecentsEnabled = false
 @Composable
 fun CourseScheduleAppUi(
     viewModel: ScheduleViewModel,
+    todoViewModel: com.xiaomanjun.sleepdownschedule.feature.todo.TodoViewModel,
+    todoEntryRequest: com.xiaomanjun.sleepdownschedule.feature.todo.TodoEntryRequest? = null,
+    onTodoEntryRequestConsumed: (Long) -> Unit = {},
+    onRequestCalendarPermission: () -> Unit = {},
+    onRequestAutoCalendarPermission: () -> Unit = {},
+    onRequestShizukuPermission: () -> Unit = {},
     externalIcsUri: Uri? = null,
     onExternalIcsConsumed: (Uri) -> Unit = {},
     onStartupContentReady: () -> Unit = {}
@@ -773,16 +843,62 @@ fun CourseScheduleAppUi(
     var snapshotJob by remember { mutableStateOf<Job?>(null) }
     var cacheHydrationJob by remember { mutableStateOf<Job?>(null) }
     var entryPrewarmJob by remember { mutableStateOf<Job?>(null) }
-    var screen by remember { mutableStateOf<Screen>(Screen.Home) }
+    var screen by rememberSaveable(stateSaver = ScreenSaver) { mutableStateOf<Screen>(Screen.Home) }
+    var lastTodoPage by rememberSaveable { mutableStateOf(TodoPage.Tasks) }
+    var todoReturnsToCourse by rememberSaveable { mutableStateOf(true) }
+    val todoChromeActions = remember { com.xiaomanjun.sleepdownschedule.feature.todo.TodoChromeActions() }
+    var localTodoRequestId by remember { mutableLongStateOf(0L) }
+    var pendingLocalTodoRequest by rememberSaveable(stateSaver = TodoEntryRequestSaver) {
+        mutableStateOf<TodoEntryRequest?>(null)
+    }
+    val activeTodoRequest = pendingLocalTodoRequest ?: todoEntryRequest
+    fun consumeTodoRequest(id: Long) {
+        if (pendingLocalTodoRequest?.id == id) pendingLocalTodoRequest = null
+        else onTodoEntryRequestConsumed(id)
+    }
+    LaunchedEffect(activeTodoRequest?.id) {
+        val request = activeTodoRequest ?: return@LaunchedEffect
+        screen = request.destination.toScreen()
+        todoReturnsToCourse = request.returnToCourse
+        val handledInTodoContent = request.todoId != null || request.courseId != null ||
+            request.startWithNewTask || request.sharedText.isNotBlank() || request.imageUris.isNotEmpty() ||
+            !request.screenshotPath.isNullOrBlank() || request.requestShizukuPermission
+        if (!handledInTodoContent) {
+            consumeTodoRequest(request.id)
+        }
+    }
+    // Commit the visible destination before another dock tap can cancel an effect.
+    SideEffect { screen.todoPage()?.let { lastTodoPage = it } }
+    BackHandler(enabled = screen.isTodoDestination() && todoReturnsToCourse) {
+        screen = Screen.Home
+        todoReturnsToCourse = true
+    }
     var settingsExitInterceptionRequired by remember { mutableStateOf(false) }
     var settingsExitRequest by remember { mutableIntStateOf(0) }
     var pendingSettingsExitAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     var homeMode by remember(state.loaded, state.config.defaultHomeMode) {
         mutableStateOf(state.config.defaultHomeMode.toHomeMode())
     }
-    val rootPageMotion = rememberHomeSwitchMotion(screen is Screen.Config, "home-settings")
+    val rootPageMotion = rememberHomeSwitchMotion(screen !is Screen.Home, "home-settings")
+    var previousDockIndex by remember { mutableIntStateOf(screen.dockIndex()) }
+    val dockEntranceDirection = remember(screen) { if (screen.dockIndex() >= previousDockIndex) 1f else -1f }
+    SideEffect { previousDockIndex = screen.dockIndex() }
+    var lastSecondaryWasTodo by remember { mutableStateOf(screen.isTodoDestination()) }
+    // Home is not a secondary destination: retain the real outgoing pane until its spring settles.
+    val secondaryPageShowsTodo = if (screen is Screen.Home) lastSecondaryWasTodo else screen.isTodoDestination()
+    SideEffect { if (screen !is Screen.Home) lastSecondaryWasTodo = screen.isTodoDestination() }
+    var secondaryPageUsesHomeWallpaper by remember {
+        mutableStateOf(screen.isTodoDestination())
+    }
+    SideEffect {
+        when {
+            screen.isTodoDestination() -> secondaryPageUsesHomeWallpaper = true
+            screen !is Screen.Home -> secondaryPageUsesHomeWallpaper = false
+            !rootPageMotion.moving -> secondaryPageUsesHomeWallpaper = false
+        }
+    }
     val homeModeMotion = key(state.loaded) {
-        rememberHomeSwitchMotion(homeMode == HomeMode.Week, "day-week")
+        rememberHomeSwitchMotion(homeMode != HomeMode.Day, "day-week-month")
     }
     val rootPageStateHolder = rememberSaveableStateHolder()
     var homeDialog by remember { mutableStateOf<HomeDialog?>(null) }
@@ -798,6 +914,20 @@ fun CourseScheduleAppUi(
     var homeDialogVisible by remember { mutableStateOf(false) }
     val appScope = rememberCoroutineScope()
     val homeAssistant = remember(appScope) { HomeAssistantState(appScope) }
+    val conversationOpen by AgentConversationNavigator.pending.collectAsStateWithLifecycle()
+    LaunchedEffect(conversationOpen, state.loaded, state.config.id) {
+        val request = conversationOpen ?: return@LaunchedEffect
+        if (!state.loaded) return@LaunchedEffect
+        if (state.config.id != request.scheduleId) {
+            if (state.schedules.any { it.id == request.scheduleId }) viewModel.activateSchedule(request.scheduleId)
+            else AgentConversationNavigator.pending.value = null
+            return@LaunchedEffect
+        }
+        screen = Screen.Home
+        AgentConversationStore.select(viewModel.getApplication<android.app.Application>(), request.scheduleId, request.key)
+        homeAssistant.openConversation(fullScreen = true, independentPage = true)
+        AgentConversationNavigator.pending.value = null
+    }
     var assistantImportUri by remember { mutableStateOf<Uri?>(null) }
     var assistantImportText by remember { mutableStateOf<String?>(null) }
     val assistantHaptic = LocalHapticFeedback.current
@@ -1224,6 +1354,10 @@ fun CourseScheduleAppUi(
     val updateHomeWallpaperRecordKey: (Any?) -> Unit = remember {
         { homeWallpaperRecordKey.value = it }
     }
+    val todoWallpaperRecordKey = remember { mutableStateOf<Any?>(null) }
+    val updateTodoWallpaperRecordKey: (Any?) -> Unit = remember {
+        { todoWallpaperRecordKey.value = it }
+    }
     val homeReadabilityContext = remember(
         wallpaperImages.readabilityBitmap,
         visualState.config,
@@ -1238,6 +1372,10 @@ fun CourseScheduleAppUi(
         )
     }
     val appDarkTheme = appUsesDarkTheme(visualState.config)
+    // Todos, calendar and insights share the wallpaper and course-card appearance used by Home.
+    // Settings continues to use settingsVisualConfig only inside its own neutral page stack.
+    val todoVisualConfig = visualState.config
+    val todoAdaptiveGlassState = rememberFallbackAdaptiveGlassState(todoVisualConfig)
     val hasUserWallpaper = !visualState.config.wallpaperUri.isNullOrBlank()
     val statusBarWallpaperLuminance = remember(homeReadabilityContext) {
         homeStatusBarWallpaperLuminance(homeReadabilityContext)
@@ -2070,6 +2208,10 @@ fun CourseScheduleAppUi(
         when {
             courseActions.size == actions.size && actions.isNotEmpty() ->
                 viewModel.executeAgentPlan(actions, onResult)
+            actions.isNotEmpty() && actions.all { it.type == AgentValidatedActionType.CREATE_TODO } ->
+                (context.applicationContext as CourseScheduleApp).applicationScope.launch(Dispatchers.Main.immediate) {
+                    onResult(executeConfirmedAgentTodos(context.applicationContext, plan))
+                }
             settingActions.isNotEmpty() && settingActions.size + courseActions.size == actions.size ->
                 viewModel.executeAgentSettingPlan(actions, onResult)
             actions.isEmpty() -> onResult(AgentPlanExecutionResult(false, null, false, "没有可执行操作"))
@@ -2087,6 +2229,9 @@ fun CourseScheduleAppUi(
                 }
             }
             else -> when (action.type) {
+            AgentValidatedActionType.CREATE_TODO -> (context.applicationContext as CourseScheduleApp).applicationScope.launch(Dispatchers.Main.immediate) {
+                onResult(executeConfirmedAgentTodos(context.applicationContext, plan))
+            }
             AgentValidatedActionType.ADD,
             AgentValidatedActionType.UPDATE,
             AgentValidatedActionType.REPLACE,
@@ -2160,6 +2305,8 @@ fun CourseScheduleAppUi(
         LocalHomeReadability provides homeReadabilityContext,
         LocalCourseCardPalette provides homeCoursePalette,
         LocalCourseCardColorAssignments provides homeCourseColorAssignments,
+        com.xiaomanjun.sleepdownschedule.feature.home.LocalPersonalizationPreview provides
+            personalizationPreviewState,
         LocalGlassSceneState provides glassSceneState,
         LocalCenteredDialogSceneBackdrop provides centeredDialogSceneBackdrop
     ) {
@@ -2201,7 +2348,8 @@ fun CourseScheduleAppUi(
                 HomeAssistantHost(
                     controller = homeAssistant,
                     state = state,
-                    available = screen is Screen.Home && homeMode == HomeMode.Week && state.loaded,
+                    available = screen is Screen.Home && state.loaded &&
+                        (homeMode == HomeMode.Week || homeAssistant.stage == HomeAssistantStage.Conversation),
                     remindersAllowed = homeMode == HomeMode.Week && !homeAssistant.editing &&
                         !homeBackgroundOverlayActive && !courseCopy.active && renderedHomeDialog == null &&
                         !jumpWeekDialogMounted && pickerState.phase is CustomizeUiState.Home &&
@@ -2448,6 +2596,7 @@ fun CourseScheduleAppUi(
             containerColor = ComposeColor.Transparent,
             contentWindowInsets = WindowInsets(0, 0, 0, 0),
             topBar = {
+                Box(Modifier.fillMaxWidth()) {
                 HomeSwitchPane(rootPageMotion, secondary = false, modifier = Modifier.fillMaxWidth(),
                     pageClip = HomeSwitchClip.TopBar) {
                 TopBarEntranceContainer(
@@ -2556,6 +2705,35 @@ fun CourseScheduleAppUi(
                     }
                 }
                 }
+                HomeSwitchPane(
+                    rootPageMotion,
+                    secondary = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    pageClip = HomeSwitchClip.TopBar
+                ) {
+                    TopBarEntranceContainer(
+                        phase = startupPhase,
+                        modifier = Modifier.fillMaxWidth()
+                            .height(rootTopBarLayoutHeight(screen))
+                    ) {
+                        if (secondaryPageShowsTodo) {
+                            CompositionLocalProvider(LocalAdaptiveGlass provides todoAdaptiveGlassState) {
+                                key(screen.todoPage() ?: lastTodoPage) {
+                                HomePageEntrance(animateOnMount = !rootPageMotion.moving, entranceDirection = dockEntranceDirection) {
+                                TodoRootTopBar(
+                                    page = screen.todoPage() ?: lastTodoPage,
+                                    config = todoVisualConfig,
+                                    backdrop = chromeBackdrop,
+                                    actions = todoChromeActions,
+                                    modifier = Modifier.align(Alignment.TopCenter)
+                                )
+                                }
+                                }
+                            }
+                        }
+                    }
+                }
+                }
             }
         ) { padding ->
             Box(
@@ -2566,10 +2744,22 @@ fun CourseScheduleAppUi(
                     modifier = Modifier
                         .fillMaxSize()
                         .glassBackdropProducer(backgroundBackdrop, recordKey = {
-                            if (rootPageMotion.retains(false) && visualState.loaded && wallpaperImages.source != null) {
-                                homeWallpaperRecordKey.value?.let { imageKey ->
-                                    listOf(imageKey, personalizationPreviewState.wallpaperBrightness
-                                        ?: visualState.config.wallpaperBrightness, rootPageMotion.pageSampleKey)
+                            if (visualState.loaded && wallpaperImages.source != null) {
+                                val imageKeys = buildList {
+                                    if (rootPageMotion.retains(false)) {
+                                        homeWallpaperRecordKey.value?.let(::add)
+                                    }
+                                    if (rootPageMotion.retains(true) && secondaryPageUsesHomeWallpaper) {
+                                        todoWallpaperRecordKey.value?.let(::add)
+                                    }
+                                }
+                                imageKeys.takeIf { it.isNotEmpty() }?.let { keys ->
+                                    listOf(
+                                        keys,
+                                        personalizationPreviewState.wallpaperBrightness
+                                            ?: visualState.config.wallpaperBrightness,
+                                        rootPageMotion.pageSampleKey
+                                    )
                                 }
                             } else null
                         })
@@ -2588,7 +2778,7 @@ fun CourseScheduleAppUi(
                                     startupPhase,
                                     previewState = personalizationPreviewState,
                                     onRecordKeyChanged = updateHomeWallpaperRecordKey,
-                                    isActive = rootPageMotion.retains(false) && visualState.loaded
+                                    isActive = screen is Screen.Home && rootPageMotion.retains(false) && visualState.loaded
                                 )
                                 WallpaperGlassSamplingToneOverlay(
                                     visualState.config,
@@ -2601,9 +2791,36 @@ fun CourseScheduleAppUi(
                         }
                     }
                     if (rootPageMotion.retains(true)) {
-                        Box(Modifier.fillMaxSize()
-                            .homeSwitchLayer(rootPageMotion, secondary = true, pageClip = HomeSwitchClip.Page)
-                            .background(settingsPageBackground(settingsVisualConfig(state.config))))
+                        Box(
+                            Modifier.fillMaxSize()
+                                .homeSwitchLayer(rootPageMotion, secondary = true, pageClip = HomeSwitchClip.Page)
+                        ) {
+                            if (secondaryPageUsesHomeWallpaper) {
+                                if (!visualState.loaded) {
+                                    HomeBackdropFallback()
+                                } else if (wallpaperImages.source != null) {
+                    HomeWallpaper(
+                        visualState.config,
+                        wallpaperImages,
+                        startupPhase,
+                        previewState = personalizationPreviewState,
+                        onRecordKeyChanged = updateTodoWallpaperRecordKey,
+                        isActive = screen.isTodoDestination() && visualState.loaded
+                    )
+                                    WallpaperGlassSamplingToneOverlay(
+                                        visualState.config,
+                                        personalizationPreviewState
+                                    )
+                                } else {
+                                    HomeBackdropFallback(noWallpaper = noWallpaperResolved)
+                                }
+                            } else {
+                                Box(
+                                    Modifier.fillMaxSize()
+                                        .background(settingsPageBackground(settingsVisualConfig(state.config)))
+                                )
+                            }
+                        }
                     }
                 }
                 /*
@@ -2619,6 +2836,18 @@ fun CourseScheduleAppUi(
                     wallpaperImages.source != null
                 ) {
                     Box(Modifier.fillMaxSize().homeSwitchLayer(rootPageMotion, secondary = false,
+                        pageClip = HomeSwitchClip.Page)) {
+                        WallpaperToneOverlay(visualState.config, personalizationPreviewState)
+                    }
+                }
+                if (
+                    rootPageMotion.retains(true) &&
+                    secondaryPageUsesHomeWallpaper &&
+                    visualState.loaded &&
+                    visualState.config.hasAnyWallpaper() &&
+                    wallpaperImages.source != null
+                ) {
+                    Box(Modifier.fillMaxSize().homeSwitchLayer(rootPageMotion, secondary = true,
                         pageClip = HomeSwitchClip.Page)) {
                         WallpaperToneOverlay(visualState.config, personalizationPreviewState)
                     }
@@ -2691,6 +2920,10 @@ fun CourseScheduleAppUi(
                                     onCourseClick = { course, week, sourceBounds ->
                                         openCourseEditor(course, week, sourceBounds)
                                     },
+                                    onOpenTodos = {
+                                        todoReturnsToCourse = true
+                                        screen = Screen.TodoTasks
+                                    },
                                     onAddCourse = viewModel::addCourse,
                                     onAgentAction = handleHomeAgentAction,
                                     onUpdateCourseSingleWeek = viewModel::updateCourseSingleWeek,
@@ -2730,7 +2963,54 @@ fun CourseScheduleAppUi(
                         }
                         HomeSwitchPane(rootPageMotion, secondary = true, modifier = Modifier.fillMaxSize(),
                             pageClip = HomeSwitchClip.Page) {
-                            rootPageStateHolder.SaveableStateProvider("settings") {
+                            AnimatedContent(
+                                targetState = secondaryPageShowsTodo,
+                                modifier = Modifier.fillMaxSize(),
+                                transitionSpec = {
+                                    if (rootPageMotion.moving) {
+                                        EnterTransition.None togetherWith ExitTransition.None
+                                    } else {
+                                        val motion = spring<Float>(dampingRatio = 0.88f, stiffness = 520f)
+                                        EnterTransition.None togetherWith
+                                            (slideOutHorizontally(
+                                                animationSpec = spring(dampingRatio = 0.9f, stiffness = 540f)
+                                            ) { if (targetState) it else -it } + fadeOut(animationSpec = motion))
+                                    }
+                                },
+                                label = "secondary-root-destination"
+                            ) { showTodoPage ->
+                            HomePageEntrance(animateOnMount = !rootPageMotion.moving, entranceDirection = if (showTodoPage) -1f else 1f) {
+                            if (showTodoPage) {
+                                rootPageStateHolder.SaveableStateProvider("todo") {
+                                    val request = activeTodoRequest
+                                    CompositionLocalProvider(LocalAdaptiveGlass provides todoAdaptiveGlassState) {
+                                        TodoPlusScreen(
+                                            viewModel = todoViewModel,
+                                            config = todoVisualConfig,
+                                            schedule = state,
+                                            backdrop = backgroundBackdrop,
+                                            page = screen.todoPage() ?: lastTodoPage,
+                                            onPageChange = { screen = it.toScreen() },
+                                            outerTransitionActive = rootPageMotion.moving,
+                                            chromeActions = todoChromeActions,
+                                            entryRequest = request,
+                                            onEntryRequestConsumed = ::consumeTodoRequest,
+                                            onRequestShizukuPermission = onRequestShizukuPermission,
+                                            initialCourseId = request?.courseId,
+                                            startWithNewTask = request?.startWithNewTask == true,
+                                            initialTodoId = request?.todoId,
+                                            onInitialCourseConsumed = {
+                                                request?.let { consumeTodoRequest(it.id) }
+                                            },
+                                            onInitialTodoConsumed = {
+                                                request?.let { consumeTodoRequest(it.id) }
+                                            },
+                                            requestCalendarPermission = onRequestCalendarPermission,
+                                            requestAutoCalendarPermission = onRequestAutoCalendarPermission
+                                        )
+                                    }
+                                }
+                            } else rootPageStateHolder.SaveableStateProvider("settings") {
                                 SettingsScreen(
                                         page = SettingsPage.Root,
                                         state = state,
@@ -2762,6 +3042,8 @@ fun CourseScheduleAppUi(
                                         }
                                     )
                             }
+                            }
+                            }
                         }
                     }
                 }
@@ -2769,7 +3051,7 @@ fun CourseScheduleAppUi(
                 showScheduleEntryPill = false
                 if (pickerState.phase is CustomizeUiState.ShowingEntryButton) pickerState.phase = CustomizeUiState.Home
             }
-            if (screen is Screen.Home || screen is Screen.Config) {
+            if (screen is Screen.Home || screen.isTodoDestination() || screen is Screen.Config) {
                 DockEntranceContainer(
                     phase = startupPhase,
                     modifier = Modifier
@@ -2784,9 +3066,9 @@ fun CourseScheduleAppUi(
                         onConfig = {
                             screen = Screen.Config
                         },
-                        onTodos = {
-                            context.startActivity(Intent(context, com.xiaomanjun.sleepdownschedule.feature.todo.TodoActivity::class.java))
-                        }
+                        onTodos = { screen = Screen.TodoTasks; todoReturnsToCourse = true },
+                        onCalendar = { screen = Screen.TodoCalendar; todoReturnsToCourse = true },
+                        onInsights = { screen = Screen.TodoInsights; todoReturnsToCourse = true }
                     )
                 }
             }
@@ -3591,7 +3873,19 @@ fun CourseScheduleAppUi(
             config = state.config,
             adaptiveMetrics = homeAdaptiveMetrics,
             modifier = Modifier.zIndex(100f),
+            suspended = screen !is Screen.Home,
             awaitOpeningGate = { awaitHomeBackgroundFrame(routeEligible = true) },
+            onManageCourseTodos = { courseId, startNewTask ->
+                localTodoRequestId -= 1L
+                pendingLocalTodoRequest = TodoEntryRequest(
+                    id = localTodoRequestId,
+                    courseId = courseId,
+                    startWithNewTask = startNewTask,
+                    returnToCourse = true
+                )
+                todoReturnsToCourse = true
+                screen = Screen.TodoTasks
+            },
             onDismissRequest = { closeCourseEditor() },
             onCopy = { courses, onResult ->
                 val sourceRequest = courseEditorRequest
@@ -4331,7 +4625,68 @@ private fun rootTopBarLayoutHeight(
                 metrics.topOverlayHeight
             }
         }
+        Screen.TodoTasks,
+        Screen.TodoCalendar,
+        Screen.TodoInsights,
         Screen.Config -> detailTopOverlayHeight()
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+private fun TodoRootTopBar(
+    page: TodoPage,
+    config: ScheduleConfigEntity,
+    backdrop: Backdrop?,
+    actions: TodoChromeActions,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier.fillMaxWidth()
+            .windowInsetsPadding(WindowInsets.statusBarsIgnoringVisibility)
+            .height(66.dp)
+            .graphicsLayer { clip = false }
+    ) {
+        TopAppBar(
+            modifier = Modifier.fillMaxSize(),
+            colors = TopAppBarDefaults.topAppBarColors(containerColor = ComposeColor.Transparent),
+            title = {}
+        )
+        Text(
+            text = when (page) {
+                TodoPage.Tasks -> "待办事项"
+                TodoPage.Calendar -> "日历"
+                TodoPage.Insights -> "效率洞察"
+            },
+            modifier = Modifier.align(Alignment.CenterStart)
+                .padding(start = 20.dp, end = 112.dp).homeSwitchGroup(0f),
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = LocalAdaptiveGlass.current.contentColor,
+            maxLines = 1
+        )
+        Row(
+            modifier = Modifier.align(Alignment.CenterEnd).padding(top = 2.dp, end = 8.dp).homeSwitchGroup(0f),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Group management was removed; retain only the existing AI and create actions.
+            HomeIconButton(
+                backdrop = backdrop,
+                config = config,
+                iconRes = R.drawable.ic_ai_import,
+                contentDescription = "AI 配置",
+                selected = false,
+                onClick = { _ -> actions.onConfigureAi() }
+            )
+            HomeIconButton(
+                backdrop = backdrop,
+                config = config,
+                iconRes = R.drawable.ic_add_course,
+                contentDescription = "添加待办",
+                selected = false,
+                onClick = { _ -> actions.onAddTodo() }
+            )
+        }
     }
 }
 
@@ -4355,6 +4710,7 @@ fun DetailActivityScaffold(
     title: String,
     config: ScheduleConfigEntity,
     onBack: () -> Unit,
+    useSettingsBackground: Boolean = false,
     showTopGradientBlur: Boolean = true,
     isolateContentFromBackdrop: Boolean = false,
     compactTopBar: Boolean = false,
@@ -4366,9 +4722,39 @@ fun DetailActivityScaffold(
     topBarActions: @Composable (Backdrop?) -> Unit = {},
     content: @Composable (Backdrop?) -> Unit
 ) {
+    val pageConfig = if (useSettingsBackground) settingsVisualConfig(config) else config
+    val wallpaperImages by rememberHomeWallpaperImages(pageConfig)
+    val expectedWallpaperKey = homeWallpaperRenderKey(pageConfig, appUsesDarkTheme(pageConfig))
+    val noWallpaperResolved = wallpaperImages.renderKey == expectedWallpaperKey && wallpaperImages.source == null
     GlassMiuixDetailActivityScaffold(
         title = title,
-        config = config,
+        config = pageConfig,
+        useSettingsBackground = useSettingsBackground,
+        backgroundContent = {
+            if (useSettingsBackground) {
+                Box(
+                    Modifier.fillMaxSize()
+                        .background(settingsPageBackground(pageConfig))
+                )
+            } else if (wallpaperImages.source != null) {
+                HomeWallpaper(
+                    config = pageConfig,
+                    images = wallpaperImages,
+                    phase = StartupPhase.FullQuality,
+                    isActive = true
+                )
+                WallpaperGlassSamplingToneOverlay(pageConfig)
+            } else {
+                HomeBackdropFallback(
+                    noWallpaper = !pageConfig.hasAnyWallpaper() || noWallpaperResolved
+                )
+            }
+        },
+        backgroundOverlayContent = {
+            if (!useSettingsBackground && wallpaperImages.source != null) {
+                WallpaperToneOverlay(pageConfig)
+            }
+        },
         onBack = onBack,
         showTopGradientBlur = showTopGradientBlur,
         isolateContentFromBackdrop = isolateContentFromBackdrop,
@@ -4637,8 +5023,8 @@ internal fun AppTopBar(
             ) {
                 HomeDateTitle(
                     state = state,
-                    displayDate = if (homeMode == HomeMode.Day) homeDisplayDate else LocalDate.now(),
-                    displayWeek = if (homeMode == HomeMode.Day) effectiveCurrentWeek(state.config, homeDisplayDate) else homeDisplayWeek,
+                    displayDate = if (homeMode != HomeMode.Week) homeDisplayDate else LocalDate.now(),
+                    displayWeek = if (homeMode != HomeMode.Week) effectiveCurrentWeek(state.config, homeDisplayDate) else homeDisplayWeek,
                     showTwoDays = false,
                     beforeScheduleTerm = beforeScheduleTerm,
                     afterScheduleTerm = afterScheduleTerm,
@@ -4779,41 +5165,10 @@ fun TopGlassIconButton(
     surfaceColorOverride: ComposeColor? = null,
     buttonHeight: Dp = 42.dp
 ) {
-    val lightGlass = glassUsesLightStyle(config)
-    if (backdrop != null) {
-        LiquidButton(
-            onClick = onClick,
-            backdrop = backdrop,
-            modifier = modifier,
-            height = buttonHeight,
-            surfaceColor = surfaceColorOverride ?: if (lightGlass) {
-                ComposeColor.White.copy(alpha = 0.26f)
-            } else {
-                ComposeColor(0xFF121212).copy(alpha = 0.28f)
-            },
-            contentPadding = PaddingValues(0.dp),
-            blurRadius = 3.dp,
-            lensHeight = 16.dp,
-            lensAmount = 24.dp,
-            chromaticAberration = false,
-            shadowEnabled = lightGlass,
-            shadowStyle = LightTopBarButtonShadow
-        ) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Icon(painterResource(iconRes), contentDescription = contentDescription, modifier = Modifier.size(22.dp))
-            }
-        }
-    } else {
-        GlassPill(
-            backdrop = null,
-            config = config,
-            modifier = modifier,
-            onClick = onClick
-        ) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Icon(painterResource(iconRes), contentDescription = contentDescription, modifier = Modifier.size(22.dp))
-            }
-        }
+    AppGlassIconButton(backdrop, config, contentDescription, onClick, modifier,
+        size = buttonHeight, surfaceOverride = surfaceColorOverride) {
+        Icon(painterResource(iconRes), contentDescription = null,
+            modifier = Modifier.size(SleepDownDesignTokens.Button.IconSize))
     }
 }
 
@@ -5132,13 +5487,18 @@ fun FloatingDock(
     previewMode: Boolean = false,
     onHome: () -> Unit,
     onConfig: () -> Unit,
-    onTodos: () -> Unit
+    onTodos: () -> Unit,
+    onCalendar: () -> Unit = {},
+    onInsights: () -> Unit = {}
 ) {
     val adaptiveGlass = LocalAdaptiveGlass.current
-    val lightGlass = if (selected is Screen.Home) {
-        adaptiveGlass.lightGlass
+    val settingsDestination = selected is Screen.Config
+    val lightGlass = if (settingsDestination) !appUsesDarkTheme(config) else adaptiveGlass.lightGlass
+    val selectedAccent = dockSelectedAccentColor(lightGlass)
+    val foreground = if (settingsDestination) {
+        if (appUsesDarkTheme(config)) ComposeColor.White else ComposeColor.Black
     } else {
-        !appUsesDarkTheme(config)
+        adaptiveGlass.contentColor
     }
     val density = LocalDensity.current
     // MIUI reports the IME-sized bottom edge through safeDrawing for the underlying Activity
@@ -5160,13 +5520,7 @@ fun FloatingDock(
     )
     val bottomOffset = (bottomInset + 8.dp).coerceAtLeast(8.dp)
     val dockTextColor by animateColorAsState(
-        targetValue = if (selected is Screen.Home) {
-            adaptiveGlass.contentColor
-        } else if (appUsesDarkTheme(config)) {
-            ComposeColor.White
-        } else {
-            ComposeColor.Black
-        },
+        targetValue = foreground,
         animationSpec = tween(220),
         label = "FloatingDockContentTheme"
     )
@@ -5180,6 +5534,8 @@ fun FloatingDock(
         DockAlignment.CENTER -> PaddingValues(start = 18.dp, end = 18.dp, bottom = bottomOffset)
         DockAlignment.RIGHT -> PaddingValues(end = 18.dp, bottom = bottomOffset)
     }
+    val dockWidthModifier = Modifier.widthIn(max = 560.dp).fillMaxWidth().excludeHomeAssistantPull()
+    val selectedTab = selected.dockIndex()
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -5192,11 +5548,17 @@ fun FloatingDock(
         if (backdrop != null) {
             CompositionLocalProvider(LocalContentColor provides dockTextColor) {
                 LiquidBottomTabs(
-                    selectedTabIndex = { if (selected is Screen.Home) 0 else 2 },
-                    onTabSelected = { index -> when (index) { 0 -> onHome(); 1 -> onTodos(); else -> onConfig() } },
+                    selectedTabIndex = { selectedTab },
+                    onTabSelected = { index -> when (index) {
+                        0 -> onHome()
+                        1 -> onTodos()
+                        2 -> onCalendar()
+                        3 -> onInsights()
+                        else -> onConfig()
+                    } },
                     backdrop = backdrop,
-                    tabsCount = 3,
-                    modifier = Modifier.width(204.dp).excludeHomeAssistantPull(),
+                    tabsCount = 5,
+                    modifier = dockWidthModifier.semantics { testTag = "benchmark_home_dock" },
                     containerHeight = 54.dp,
                     indicatorHeight = 46.dp,
                     blurRadius = homeChromeBlur(1.3.dp, config),
@@ -5214,6 +5576,7 @@ fun FloatingDock(
                     isLightThemeOverride = lightGlass,
                     lightContainerColor = HomeLightGlassSurfaceColor,
                     lightAccentColor = HomeLightGlassSelectedAccentColor,
+                    darkAccentColor = dockSelectedAccentColor(lightGlass = false),
                     useOfficialGlassParameters = true
                 ) {
                     LiquidBottomTab(onClick = onHome) {
@@ -5222,20 +5585,72 @@ fun FloatingDock(
                     LiquidBottomTab(onClick = onTodos) {
                         DockTabContent(R.drawable.ic_check, "待办", iconSize = 22.dp)
                     }
+                    LiquidBottomTab(onClick = onCalendar) {
+                        DockVectorTabContent(Icons.Default.CalendarMonth, "日历")
+                    }
+                    LiquidBottomTab(onClick = onInsights) {
+                        DockVectorTabContent(Icons.Default.Insights, "洞察")
+                    }
                     LiquidBottomTab(onClick = onConfig) {
                         DockTabContent(R.drawable.ic_settings, "设置", iconSize = 24.dp)
                     }
                 }
             }
         } else {
-            GlassPill(backdrop = null, config = config, modifier = Modifier.width(204.dp).excludeHomeAssistantPull()) {
-                Row(modifier = Modifier.height(54.dp).padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    DockItem(selected is Screen.Home, null, config, R.drawable.ic_courses, "课程", onHome)
-                    DockItem(false, null, config, R.drawable.ic_check, "待办", onTodos)
-                    DockItem(selected is Screen.Config, null, config, R.drawable.ic_settings, "设置", onConfig)
+            GlassPill(backdrop = null, config = config, modifier = dockWidthModifier) {
+                Row(modifier = Modifier.fillMaxWidth().height(54.dp).padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    DockFallbackItem(selectedTab == 0, "课程", dockTextColor, selectedAccent, R.drawable.ic_courses, onClick = onHome)
+                    DockFallbackItem(selectedTab == 1, "待办", dockTextColor, selectedAccent, R.drawable.ic_check, onClick = onTodos)
+                    DockFallbackItem(selectedTab == 2, "日历", dockTextColor, selectedAccent, icon = Icons.Default.CalendarMonth, onClick = onCalendar)
+                    DockFallbackItem(selectedTab == 3, "洞察", dockTextColor, selectedAccent, icon = Icons.Default.Insights, onClick = onInsights)
+                    DockFallbackItem(selectedTab == 4, "设置", dockTextColor, selectedAccent, R.drawable.ic_settings, onClick = onConfig)
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun DockVectorTabContent(icon: ImageVector, label: String) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(1.dp)) {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(21.dp))
+        Text(label, style = MaterialTheme.typography.labelSmall, maxLines = 1, softWrap = false)
+    }
+}
+
+@Composable
+private fun RowScope.DockFallbackItem(
+    selected: Boolean,
+    label: String,
+    foreground: ComposeColor,
+    selectedAccent: ComposeColor,
+    iconRes: Int? = null,
+    icon: ImageVector? = null,
+    onClick: () -> Unit
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) 0.93f else 1f,
+        animationSpec = spring(dampingRatio = 0.58f, stiffness = 720f),
+        label = "dock-tab-press"
+    )
+    Column(
+        Modifier.weight(1f).fillMaxSize()
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .clip(Capsule())
+            .background(if (selected) selectedAccent.copy(alpha = 0.15f) else ComposeColor.Transparent)
+            .clickable(interactionSource = interaction, indication = null, onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        if (iconRes != null) {
+            Icon(painterResource(iconRes), contentDescription = null, modifier = Modifier.size(21.dp), tint = foreground)
+        } else if (icon != null) {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(21.dp), tint = foreground)
+        }
+        Text(label, style = MaterialTheme.typography.labelSmall, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            color = foreground, maxLines = 1, softWrap = false)
     }
 }
 
@@ -6948,6 +7363,7 @@ open class SettingsDetailActivityHost : ComponentActivity() {
                 DetailActivityScaffold(
                     title = section.title(),
                     config = state.config,
+                    useSettingsBackground = true,
                     compactTopBar = section.usesPersistentCenteredSettingsTitle(),
                     centerCompactTitle = section.usesPersistentCenteredSettingsTitle(),
                     compactTitleMatchesSettings = section.usesPersistentCenteredSettingsTitle(),
@@ -7579,13 +7995,14 @@ fun LiquidControlToggle(
             onSelect = { if (enabled) onCheckedChange(it) },
             backdrop = backdrop,
             compact = compact,
-            modifier = modifier.graphicsLayer { this.alpha = alpha }
+            enabled = enabled,
+            modifier = modifier.heightIn(min = 48.dp).graphicsLayer { this.alpha = alpha }
         )
     } else {
         Switch(
             checked = checked,
             onCheckedChange = { if (enabled) onCheckedChange(it) },
-            modifier = modifier.graphicsLayer {
+            modifier = modifier.heightIn(min = 48.dp).graphicsLayer {
                 this.alpha = alpha
                 scaleX = if (compact) 0.8f else 1f
                 scaleY = if (compact) 0.8f else 1f
@@ -8021,7 +8438,13 @@ fun SettingsRootScreen(
     val appName = remember {
         runCatching {
             context.packageManager.getApplicationLabel(context.applicationInfo).toString()
-        }.getOrDefault("课表+")
+        }.getOrDefault(context.getString(R.string.app_name))
+    }
+    val iconRevision by com.xiaomanjun.sleepdownschedule.core.identity.AppIconManager.changes.collectAsState()
+    val appIconRes = remember(darkTheme, iconRevision) { currentIconResId(context, darkTheme) }
+    val appIconDrawable = remember(context, appIconRes) {
+        runCatching { context.getDrawable(appIconRes) }.getOrNull()
+            ?: runCatching { context.packageManager.getApplicationIcon(context.packageName) }.getOrNull()
     }
     GlassMiuixRootSettingsScaffold(
         title = "设置",
@@ -8045,9 +8468,14 @@ fun SettingsRootScreen(
                     title = appName,
                     summary = "版本、来源与许可信息",
                     startAction = {
-                        Image(
-                            painter = painterResource(currentIconResId(context, darkTheme)),
-                            contentDescription = null,
+                        AndroidView(
+                            factory = { viewContext ->
+                                ImageView(viewContext).apply {
+                                    scaleType = ImageView.ScaleType.FIT_CENTER
+                                    contentDescription = context.getString(R.string.app_icon_content_description)
+                                }
+                            },
+                            update = { imageView -> imageView.setImageDrawable(appIconDrawable) },
                             modifier = Modifier
                                 .padding(end = 10.dp)
                                 .size(56.dp)
@@ -8103,7 +8531,6 @@ fun SettingsRootScreen(
                     SettingsNavigationRow(
                         "自动刷新课表",
                         "连接教务系统，手动或定时同步课程",
-                        badgeText = "实验功能",
                         selected = selectedPage == SettingsPage.AutoRefreshSchedule,
                         onClick = { onPageChange(SettingsPage.AutoRefreshSchedule) }
                     )
@@ -8340,17 +8767,17 @@ private fun AboutGlassPanel(
     val panelGradient = if (darkTheme) {
         Brush.linearGradient(
             listOf(
-                ComposeColor(0xFF244987).copy(alpha = 0.60f),
-                ComposeColor(0xFF383C80).copy(alpha = 0.54f),
-                ComposeColor(0xFF562D69).copy(alpha = 0.58f)
+                MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
+                MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.82f),
+                MaterialTheme.colorScheme.surface.copy(alpha = 0.86f)
             )
         )
     } else {
         Brush.linearGradient(
             listOf(
-                ComposeColor(0xFFFFF5FA),
-                ComposeColor(0xFFFAF3FC),
-                ComposeColor(0xFFF3F4FD)
+                MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
+                MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.82f),
+                MaterialTheme.colorScheme.surface.copy(alpha = 0.86f)
             )
         )
     }
@@ -8364,7 +8791,12 @@ private fun AboutGlassPanel(
                     clipPath(path) { this@onDrawWithContent.drawContent() }
                 }
             } else Modifier.clip(shape))
-            .background(panelGradient),
+            .background(panelGradient)
+            .border(
+                width = 1.dp,
+                color = ComposeColor.White.copy(alpha = if (darkTheme) 0.22f else 0.88f),
+                shape = shape
+            ),
         content = content
     )
 }
@@ -8483,113 +8915,112 @@ private fun AboutFeatureCard(
 
 @Composable
 private fun AboutHero(
+    appName: String,
     versionName: String,
     iconResId: Int,
-    titleBrush: Brush,
-    collapseProgress: State<Float>,
-    scrollOffsetPx: State<Float>,
-    modifier: Modifier = Modifier
+    darkTheme: Boolean
 ) {
-    Column(
-        modifier = modifier
-            .padding(horizontal = 18.dp, vertical = 44.dp)
-            .graphicsLayer {
-                val rawProgress = collapseProgress.value.coerceIn(0f, 1f)
-                val rawShrinkProgress = (rawProgress / 0.48f).coerceIn(0f, 1f)
-                val shrinkProgress = rawShrinkProgress * rawShrinkProgress * (3f - 2f * rawShrinkProgress)
-                val rawFadeProgress = ((rawProgress - 0.36f) / 0.16f).coerceIn(0f, 1f)
-                val fadeProgress = rawFadeProgress * rawFadeProgress * (3f - 2f * rawFadeProgress)
-                val scale = 1f - 0.28f * shrinkProgress
-                scaleX = scale
-                scaleY = scale
-                translationY = scrollOffsetPx.value * 0.52f + 30.dp.toPx() * shrinkProgress
-                alpha = 1f - fadeProgress
-            },
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Image(
-            painter = painterResource(iconResId),
-            contentDescription = null,
-            modifier = Modifier
-                .size(116.dp)
-                .clip(RoundedRectangle(30.dp))
-        )
-        Spacer(Modifier.height(30.dp))
-        BoxWithConstraints(
-            modifier = Modifier.fillMaxWidth(),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = "课表+",
-                style = MaterialTheme.typography.displaySmall.copy(brush = titleBrush),
-                fontSize = if (maxWidth < 320.dp) 30.sp else 36.sp,
-                lineHeight = if (maxWidth < 320.dp) 36.sp else 43.sp,
-                fontWeight = FontWeight.ExtraBold,
-                textAlign = TextAlign.Center,
-                maxLines = 1,
-                softWrap = false
-            )
+    val context = LocalContext.current
+    val appIconDrawable = remember(context, iconResId) {
+        runCatching { context.getDrawable(iconResId) }.getOrNull()
+            ?: runCatching { context.packageManager.getApplicationIcon(context.packageName) }.getOrNull()
+    }
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val compact = maxWidth < 380.dp
+        AboutGlassPanel(darkTheme = darkTheme, modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.fillMaxWidth().padding(top = 22.dp)) {
+                if (compact) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 2.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        AboutAppIcon(
+                            appName = appName,
+                            drawable = appIconDrawable,
+                            modifier = Modifier.size(82.dp).clip(RoundedRectangle(24.dp))
+                        )
+                        Spacer(Modifier.height(14.dp))
+                        Text(
+                            text = appName,
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = "课程、待办与日程，一处安排",
+                            style = MaterialTheme.typography.bodyMedium,
+                            textAlign = TextAlign.Center,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        AboutAppIcon(
+                            appName = appName,
+                            drawable = appIconDrawable,
+                            modifier = Modifier.size(82.dp).clip(RoundedRectangle(24.dp))
+                        )
+                        Spacer(Modifier.width(18.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = appName,
+                                style = MaterialTheme.typography.headlineMedium,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                text = "课程、待办与日程，一处安排",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(18.dp))
+                SettingsDivider()
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text("当前版本", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("v$versionName", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text("最低支持", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Android 8.0+", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
         }
-        Spacer(Modifier.height(10.dp))
-        Text(
-            text = "课程与任务，一眼掌握",
-            style = MaterialTheme.typography.titleMedium,
-            textAlign = TextAlign.Center,
-            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.72f)
-        )
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = "版本 $versionName",
-            style = MaterialTheme.typography.bodyMedium,
-            textAlign = TextAlign.Center,
-            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.56f)
-        )
     }
 }
 
 @Composable
-private fun AboutCreditLinkRow(
-    author: String,
-    repository: String,
-    onClick: () -> Unit
+private fun AboutAppIcon(
+    appName: String,
+    drawable: android.graphics.drawable.Drawable?,
+    modifier: Modifier = Modifier
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = author,
-            modifier = Modifier.weight(0.43f),
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.Medium,
-            color = MaterialTheme.colorScheme.onSurface
-        )
-        Row(
-            modifier = Modifier.weight(0.57f),
-            horizontalArrangement = Arrangement.End,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                painter = painterResource(R.drawable.ic_github),
-                contentDescription = null,
-                modifier = Modifier.size(18.dp),
-                tint = MaterialTheme.colorScheme.primary
-            )
-            Spacer(Modifier.width(7.dp))
-            Text(
-                text = repository,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                color = MaterialTheme.colorScheme.primary
-            )
-        }
-    }
+    AndroidView(
+        factory = { viewContext ->
+            ImageView(viewContext).apply {
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                contentDescription = "$appName 应用图标"
+            }
+        },
+        update = { imageView -> imageView.setImageDrawable(drawable) },
+        modifier = modifier
+    )
 }
 
 @Composable
@@ -8599,6 +9030,9 @@ fun ChangelogSettingsScreen(
     onPrivacyPolicy: () -> Unit = {}
 ) {
     val context = LocalContext.current
+    val darkTheme = appUsesDarkTheme(state.config)
+    val iconRevision by com.xiaomanjun.sleepdownschedule.core.identity.AppIconManager.changes.collectAsState()
+    val appIconRes = remember(context, darkTheme, iconRevision) { currentIconResId(context, darkTheme) }
     LazyColumn(
         contentPadding = PaddingValues(
             start = 16.dp,
@@ -8609,54 +9043,31 @@ fun ChangelogSettingsScreen(
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {
-            AboutGlassPanel(darkTheme = appUsesDarkTheme(state.config), modifier = Modifier.fillMaxWidth()) {
-                SettingsInfoRow("课表+", "课程表、待办事项与日常安排，数据默认保存在本机。")
-                SettingsDivider()
-                SettingsValueRow("版本", BuildConfig.VERSION_NAME)
-                SettingsValueRow("最低系统版本", "Android 8.0（API 26）")
-            }
-        }
-        item {
-            AboutSectionHeading(title = "修改版声明")
-            AboutGlassPanel(darkTheme = appUsesDarkTheme(state.config), modifier = Modifier.fillMaxWidth()) {
-                SettingsInfoRow(
-                    "非官方修改版",
-                    "基于 SleepDown课程表修改；原作者：xiaomanjun233；原项目：https://github.com/xiaomanjun233/SleepDown-Schedule；非官方修改版。"
-                )
-                SettingsDivider()
-                SettingsNavigationRow(
-                    "查看原项目",
-                    "SleepDown-Schedule 原项目与许可信息",
-                    onClick = {
-                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(SchedulePlusOriginUrl)))
-                    }
-                )
-                SettingsDivider()
-                SettingsNavigationRow(
-                    "查看修改版源码",
-                    "课表+ 的公开源码与版本发布",
-                    onClick = {
-                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(SchedulePlusSourceUrl)))
-                    }
-                )
-                SettingsDivider()
-                SettingsNavigationRow(
-                    "查看完整许可",
-                    "了解源码可见、非商业使用与署名要求",
-                    onClick = {
-                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(SchedulePlusLicenseUrl)))
-                    }
-                )
-            }
+            AboutHero(
+                appName = context.getString(R.string.app_name),
+                versionName = BuildConfig.VERSION_NAME,
+                iconResId = appIconRes,
+                darkTheme = darkTheme
+            )
         }
         if (BuildConfig.DISTRIBUTION_CHANNEL == "github") {
             item {
-                SchedulePlusUpdatePanel(darkTheme = appUsesDarkTheme(state.config))
+                SchedulePlusUpdatePanel(darkTheme = darkTheme)
             }
         }
         item {
-            AboutSectionHeading(title = "数据与隐私")
-            AboutGlassPanel(darkTheme = appUsesDarkTheme(state.config), modifier = Modifier.fillMaxWidth()) {
+            AboutSectionHeading(title = "应用能力", summary = "围绕课程、任务和日常时间安排。")
+            AboutGlassPanel(darkTheme = darkTheme, modifier = Modifier.fillMaxWidth()) {
+                SettingsInfoRow("课程表", "多课表、教务导入、手动编辑、课程提醒、备份恢复与桌面小组件。")
+                SettingsDivider()
+                SettingsInfoRow("待办事项", "支持分组、子任务、优先级、重复规则、置顶、课程关联、日历视图与桌面小组件。")
+                SettingsDivider()
+                SettingsInfoRow("界面体验", "液态玻璃视觉体系，适配浅色、深色、壁纸背景与不同屏幕尺寸。")
+            }
+        }
+        item {
+            AboutSectionHeading(title = "数据与隐私", summary = "本机优先，联网功能由你主动启用。")
+            AboutGlassPanel(darkTheme = darkTheme, modifier = Modifier.fillMaxWidth()) {
                 SettingsInfoRow(
                     "本机优先",
                     "课程、待办、分组与设置默认只保存在设备本地。AI 提取和系统日历同步仅在你主动启用后使用。"
@@ -8670,13 +9081,29 @@ fun ChangelogSettingsScreen(
             }
         }
         item {
-            AboutSectionHeading(title = "界面与功能")
-            AboutGlassPanel(darkTheme = appUsesDarkTheme(state.config), modifier = Modifier.fillMaxWidth()) {
-                SettingsInfoRow("课程表", "多课表、教务导入、手动编辑、课程提醒、备份恢复与桌面小组件。")
+            AboutSectionHeading(title = "界面与开源组件", summary = "液态玻璃材质与组件信息。")
+            AboutGlassPanel(darkTheme = darkTheme, modifier = Modifier.fillMaxWidth()) {
+                SettingsInfoRow(
+                    "液态玻璃",
+                    "时序清单使用 AndroidLiquidGlass / Backdrop 构建背景采样、折射与高光效果。"
+                )
                 SettingsDivider()
-                SettingsInfoRow("待办事项", "支持分组、子任务、优先级、重复规则、置顶、课程关联、日历视图与桌面小组件。")
+                SettingsNavigationRow(
+                    "玻璃组件",
+                    "查看 AndroidLiquidGlass 项目页面",
+                    onClick = {
+                        runCatching {
+                            context.startActivity(
+                                Intent(
+                                    Intent.ACTION_VIEW,
+                                    Uri.parse("https://github.com/Kyant0/AndroidLiquidGlass")
+                                )
+                            )
+                        }
+                    }
+                )
                 SettingsDivider()
-                SettingsInfoRow("液态玻璃", "保留 Kyant AndroidLiquidGlass 与 Miuix 视觉体系，并适配浅色、深色和壁纸背景。")
+                SettingsInfoRow("许可证", "完整许可与第三方声明见项目仓库中的 LICENSE.md 和 THIRD_PARTY_NOTICES.md。")
             }
         }
     }
@@ -8693,7 +9120,7 @@ private fun SchedulePlusUpdatePanel(darkTheme: Boolean) {
 
     AboutSectionHeading(title = "版本更新")
     AboutGlassPanel(darkTheme = darkTheme, modifier = Modifier.fillMaxWidth()) {
-        SettingsInfoRow("更新来源", "只从 linkasz/schedule-plus-android 的 GitHub Release 获取更新。")
+        SettingsInfoRow("更新来源", "只从时序清单的 GitHub Release 获取更新。")
         SettingsDivider()
         Row(
             modifier = Modifier
@@ -8758,9 +9185,6 @@ private fun SchedulePlusUpdatePanel(darkTheme: Boolean) {
     }
 }
 
-private const val SchedulePlusOriginUrl = "https://github.com/xiaomanjun233/SleepDown-Schedule"
-private const val SchedulePlusLicenseUrl = "https://github.com/xiaomanjun233/SleepDown-Schedule/blob/main/LICENSE.md"
-private const val SchedulePlusSourceUrl = "https://github.com/linkasz/schedule-plus-android"
 private fun Context.resolveSleepDownCustomTabsPackage(): String? {
     return CustomTabsClient.getPackageName(
         this,

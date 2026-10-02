@@ -54,6 +54,7 @@ import top.yukonga.miuix.kmp.basic.PopupPositionProvider
 import top.yukonga.miuix.kmp.overlay.OverlayCascadingListPopup
 import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import kotlin.math.roundToInt
 
 /** Business model only; Miuix owns popup layout, input and cascading motion. */
 @Immutable
@@ -70,7 +71,8 @@ internal data class SleepDownLiquidMenuItem(
 )
 
 private class UpwardDropdownPositionProvider(
-    horizontalSafeInset: Dp
+    horizontalSafeInset: Dp,
+    private val explicitAnchorBounds: Rect?
 ) : PopupPositionProvider {
     private val margins = PaddingValues(horizontal = horizontalSafeInset, vertical = 8.dp)
 
@@ -81,33 +83,61 @@ private class UpwardDropdownPositionProvider(
         popupContentSize: IntSize,
         popupMargin: IntRect,
         alignment: PopupPositionProvider.Align
-    ): IntOffset {
-        val endAligned = when (alignment) {
-            PopupPositionProvider.Align.End,
-            PopupPositionProvider.Align.TopEnd,
-            PopupPositionProvider.Align.BottomEnd -> layoutDirection == LayoutDirection.Ltr
-
-            else -> layoutDirection == LayoutDirection.Rtl
-        }
-        val preferredX = if (endAligned) {
-            anchorBounds.right - popupContentSize.width - popupMargin.right
-        } else {
-            anchorBounds.left + popupMargin.left
-        }
-        val minX = windowBounds.left
-        val maxX = (windowBounds.right - popupContentSize.width - popupMargin.right)
-            .coerceAtLeast(minX)
-        val minY = windowBounds.top + popupMargin.top
-        val maxY = (windowBounds.bottom - popupContentSize.height - popupMargin.bottom)
-            .coerceAtLeast(minY)
-        return IntOffset(
-            x = preferredX.coerceIn(minX, maxX),
-            y = (anchorBounds.top - popupContentSize.height - popupMargin.top)
-                .coerceIn(minY, maxY)
-        )
-    }
+    ): IntOffset = calculateUpwardDropdownPosition(
+        layoutAnchorBounds = anchorBounds,
+        explicitAnchorBounds = explicitAnchorBounds,
+        windowBounds = windowBounds,
+        layoutDirection = layoutDirection,
+        popupContentSize = popupContentSize,
+        popupMargin = popupMargin,
+        alignment = alignment
+    )
 
     override fun getMargins(): PaddingValues = margins
+}
+
+internal fun calculateUpwardDropdownPosition(
+    layoutAnchorBounds: IntRect,
+    explicitAnchorBounds: Rect?,
+    windowBounds: IntRect,
+    layoutDirection: LayoutDirection,
+    popupContentSize: IntSize,
+    popupMargin: IntRect,
+    alignment: PopupPositionProvider.Align
+): IntOffset {
+    val anchor = explicitAnchorBounds?.takeIf { it.width > 1f && it.height > 1f }?.let {
+        IntRect(
+            left = it.left.roundToInt(),
+            top = it.top.roundToInt(),
+            right = it.right.roundToInt(),
+            bottom = it.bottom.roundToInt()
+        )
+    } ?: layoutAnchorBounds
+    val endAligned = when (alignment) {
+        PopupPositionProvider.Align.End,
+        PopupPositionProvider.Align.TopEnd,
+        PopupPositionProvider.Align.BottomEnd -> layoutDirection == LayoutDirection.Ltr
+
+        else -> layoutDirection == LayoutDirection.Rtl
+    }
+    val preferredX = if (endAligned) {
+        anchor.right - popupContentSize.width - popupMargin.right
+    } else {
+        anchor.left + popupMargin.left
+    }
+    val minX = windowBounds.left + popupMargin.left
+    val maxX = (windowBounds.right - popupContentSize.width - popupMargin.right)
+        .coerceAtLeast(minX)
+    val minY = windowBounds.top + popupMargin.top
+    val maxY = (windowBounds.bottom - popupContentSize.height - popupMargin.bottom)
+        .coerceAtLeast(minY)
+    val preferredY = anchor.top - popupContentSize.height - popupMargin.top
+    val belowY = anchor.bottom + popupMargin.bottom
+    val y = if (preferredY >= minY) preferredY else belowY.coerceAtMost(maxY)
+    return IntOffset(
+        x = preferredX.coerceIn(minX, maxX),
+        y = y.coerceIn(minY, maxY)
+    )
 }
 
 @Composable
@@ -306,7 +336,7 @@ private fun SleepDownLiquidMenuItem.asMiuixDropdownItem(iconColor: Color): Dropd
 @Composable
 internal fun SleepDownLiquidCascadingPopup(
     show: Boolean,
-    @Suppress("UNUSED_PARAMETER") anchorBounds: Rect,
+    anchorBounds: Rect? = null,
     items: List<SleepDownLiquidMenuItem>,
     onDismissRequest: () -> Unit,
     backdrop: Backdrop?,
@@ -350,8 +380,8 @@ internal fun SleepDownLiquidCascadingPopup(
     val popupRowColors = rememberSleepDownPopupRowColors(
         contentColor ?: sleepDownPanelForegroundColor(config)
     )
-    val popupPositionProvider = remember(horizontalSafeInset) {
-        UpwardDropdownPositionProvider(horizontalSafeInset)
+    val popupPositionProvider = remember(horizontalSafeInset, anchorBounds) {
+        UpwardDropdownPositionProvider(horizontalSafeInset, anchorBounds)
     }
     OverlayCascadingListPopup(
         show = show,

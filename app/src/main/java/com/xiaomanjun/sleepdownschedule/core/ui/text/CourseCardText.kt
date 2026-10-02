@@ -51,7 +51,8 @@ internal fun CourseCardText(
     maxLines: Int = Int.MAX_VALUE,
     overflow: TextOverflow = TextOverflow.Clip,
     adaptiveContrast: Boolean = true,
-    shadowLightText: Boolean? = null
+    shadowLightText: Boolean? = null,
+    localMonochrome: Boolean = false
 ) {
     val fallback = remember(themeColor, color) {
         themeColor?.let {
@@ -114,7 +115,11 @@ internal fun CourseCardText(
         if (previousSamples != null && previousSamples.size == samples.size &&
             samples.indices.all { abs(samples[it] - previousSamples[it]) < 0.012f }) return true
         lastSamples[0] = samples
-        if (themeColor != null) {
+        if (localMonochrome) {
+            // Calendar labels choose ink per local region; keep course-page polarity unchanged.
+            target = localMonochromeTextColor(samples, target, color.alpha)
+            targetShadowStrength = softTextShadowStrength(samples, target.luminance(), color.alpha)
+        } else if (themeColor != null) {
             target = courseTextColorForBackground(themeColor, samples, target)
             targetShadowStrength = 0f
         } else {
@@ -152,7 +157,7 @@ internal fun CourseCardText(
         resolved[0] = updateForeground()
     }
     val density = LocalDensity.current
-    val lightText = shadowLightText ?: (color.luminance() >= 0.5f)
+    val lightText = shadowLightText ?: ((if (localMonochrome) foreground else color).luminance() >= 0.5f)
     val effectiveFontSize = when {
         fontSize != TextUnit.Unspecified -> fontSize
         style.fontSize != TextUnit.Unspecified -> style.fontSize
@@ -174,7 +179,7 @@ internal fun CourseCardText(
     Text(
         text = text,
         modifier = modifier.onGloballyPositioned { coordinates[0] = it; updateAfterMotion() },
-        color = if (themeColor == null) color else foreground,
+        color = if (themeColor == null && !localMonochrome) color else foreground,
         style = shadowStyle,
         fontWeight = if (themeColor != null) maxOf(fontWeight ?: style.fontWeight ?: FontWeight.Normal, FontWeight.Bold) else fontWeight,
         fontSize = fontSize,

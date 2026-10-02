@@ -12,6 +12,8 @@ import com.xiaomanjun.sleepdownschedule.*
 import com.xiaomanjun.sleepdownschedule.feature.agent.*
 
 import android.appwidget.AppWidgetManager
+import android.app.PendingIntent
+import android.content.Intent
 import android.widget.FrameLayout
 import android.widget.RemoteViews
 import android.widget.Toast
@@ -19,7 +21,9 @@ import android.view.ViewGroup
 import android.content.ComponentName
 import android.graphics.Bitmap
 import android.net.Uri
-import android.os.Bundle
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -65,7 +69,6 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -99,6 +102,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.UUID
 import kotlin.math.abs
 import top.yukonga.miuix.kmp.squircle.squircleClip
 
@@ -162,9 +166,35 @@ fun WidgetCustomizationScreen(
         derivedStateOf { pagerState.settledPage.coerceIn(widgetTypes.indices) }
     }
     val selectedType = widgetTypes[selectedPage]
-    // Reuse the exact rendered previews already displayed by the pager. A pin request without
-    // EXTRA_APPWIDGET_PREVIEW can produce an empty confirmation sheet on the current launcher.
-    val widgetPreviews = remember { mutableStateMapOf<WidgetAppearanceVariant, RemoteViews>() }
+    var pinRequestToken by remember { mutableStateOf(WidgetPinTracker.currentToken(context)) }
+    var pinRequestStatus by remember { mutableStateOf<String?>(null) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    fun updatePinStatus() {
+        pinRequestStatus = when (WidgetPinTracker.result(context, manager, pinRequestToken)) {
+            WidgetPinTracker.Result.ADDED -> "已添加到桌面"
+            WidgetPinTracker.Result.WAITING -> "尚未确认添加。请在系统提示中确认；若没有提示，可从桌面小组件列表手动添加。"
+            WidgetPinTracker.Result.NONE -> pinRequestStatus
+        }
+    }
+
+    LaunchedEffect(pinRequestToken) {
+        if (pinRequestToken != null) {
+            updatePinStatus()
+            repeat(20) {
+                if (pinRequestStatus == "已添加到桌面") return@LaunchedEffect
+                delay(1_000)
+                updatePinStatus()
+            }
+        }
+    }
+    DisposableEffect(lifecycleOwner, pinRequestToken) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME && pinRequestToken != null) updatePinStatus()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     suspend fun reload() {
         appearances = repository.all()
@@ -323,7 +353,6 @@ fun WidgetCustomizationScreen(
                                         onBoundsChanged = {
                                             if (page == pagerState.currentPage) currentPreviewBounds = it
                                         },
-                                        onRemoteViewsReady = { widgetPreviews[type] = it }
                                     )
                                 }
                                 Spacer(Modifier.height(8.dp))
@@ -342,17 +371,54 @@ fun WidgetCustomizationScreen(
                     ) {
                     LiquidMenuButton(
                         backdrop = backdrop,
-                        label = if (widgetPreviews[selectedType] == null) "加载预览…" else "添加到桌面",
+                        label = "添加到桌面",
                         onClick = {
-                            val preview = widgetPreviews[selectedType] ?: return@LiquidMenuButton
-                            val extras = Bundle().apply {
-                                putParcelable(AppWidgetManager.EXTRA_APPWIDGET_PREVIEW, preview)
+                            pinRequestToken?.let { WidgetPinTracker.clear(context, it) }
+                            pinRequestToken = null
+                            val supported = runCatching { manager.isRequestPinAppWidgetSupported }
+                                .getOrDefault(false)
+                            val message = if (!supported) {
+                                "当前桌面不支持应用内添加，请在桌面长按空白处选择小组件"
+                            } else {
+                                val provider = providerComponent(selectedType)
+                                val beforeIds = runCatching { installedIds(selectedType) }.getOrDefault(intArrayOf())
+                                val token = UUID.randomUUID().toString()
+                                WidgetPinTracker.begin(context, token, provider, beforeIds)
+                                val callback = PendingIntent.getBroadcast(
+                                    context,
+                                    token.hashCode(),
+                                    Intent(context, WidgetPinResultReceiver::class.java)
+                                        .setAction(WidgetPinResultReceiver.ACTION_PINNED)
+                                        .setData(Uri.parse("scheduleplus://widget-pin/$token"))
+                                        .putExtra(WidgetPinResultReceiver.EXTRA_REQUEST_TOKEN, token),
+                                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                                )
+                                // The provider metadata already declares its preview. Launcher decides
+                                // whether to show a confirmation screen; this call cannot force one.
+                                val result = runCatching {
+                                    manager.requestPinAppWidget(provider, null, callback)
+                                }
+                                result.exceptionOrNull()?.let { error ->
+                                    android.util.Log.w("WidgetPin", "Launcher pin request failed", error)
+                                }
+                                android.util.Log.i("WidgetPin", "request accepted=${result.getOrDefault(false)} provider=${provider.className}")
+                                when {
+                                    result.isFailure -> {
+                                        WidgetPinTracker.clear(context, token)
+                                        "添加请求失败，请在桌面长按空白处选择小组件"
+                                    }
+                                    result.getOrDefault(false) -> {
+                                        pinRequestToken = token
+                                        "等待桌面确认，尚未添加。未出现系统提示时可从桌面小组件列表手动添加。"
+                                    }
+                                    else -> {
+                                        WidgetPinTracker.clear(context, token)
+                                        "桌面未接收添加请求，请在桌面长按空白处选择小组件"
+                                    }
+                                }
                             }
-                            val requested = manager.isRequestPinAppWidgetSupported &&
-                                manager.requestPinAppWidget(providerComponent(selectedType), extras, null)
-                            if (!requested) {
-                                Toast.makeText(context, "当前桌面不支持直接添加，请在桌面长按空白处添加小组件", Toast.LENGTH_LONG).show()
-                            }
+                            pinRequestStatus = message
+                            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
                         },
                         modifier = Modifier.weight(1f),
                         textColorOverride = Color.White,
@@ -377,6 +443,30 @@ fun WidgetCustomizationScreen(
                             Color.White.copy(alpha = 0.74f)
                         }
                     )
+                    }
+                    pinRequestStatus?.let { status ->
+                        Text(
+                            text = status,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        if (status != "已添加到桌面") {
+                            LiquidMenuButton(
+                                backdrop = backdrop,
+                                label = "前往桌面手动添加",
+                                onClick = {
+                                    context.startActivity(
+                                        Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+                                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    )
+                                },
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+                                textColorOverride = if (darkPage) Color.White else Color.Black,
+                                surfaceColorOverride = if (darkPage) Color(0xFF4A4A4F).copy(alpha = 0.72f)
+                                    else Color.White.copy(alpha = 0.74f)
+                            )
+                        }
                     }
                 }
             }
@@ -583,14 +673,12 @@ private fun WidgetRemoteViewsPreview(
     useParentSize: Boolean = false,
     transparentBackground: Boolean = false,
     onBoundsChanged: (Rect) -> Unit = {},
-    onReady: () -> Unit = {},
-    onRemoteViewsReady: (RemoteViews) -> Unit = {}
+    onReady: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val renderSize = remember(type) { canonicalWidgetPreviewSize(type) }
     var remoteViews by remember(type) { mutableStateOf<RemoteViews?>(null) }
     val latestOnReady = rememberUpdatedState(onReady)
-    val latestOnRemoteViewsReady = rememberUpdatedState(onRemoteViewsReady)
     LaunchedEffect(type, appearance, state, transparentBackground) {
         // Slider/crop gestures can emit dozens of appearance snapshots per second. Keep the
         // last valid preview on screen and collapse that burst into one expensive bitmap pass.
@@ -667,7 +755,6 @@ private fun WidgetRemoteViewsPreview(
         rendered.exceptionOrNull()?.let { if (it is CancellationException) throw it }
         rendered.onSuccess { (views, _) ->
             remoteViews = views
-            latestOnRemoteViewsReady.value(views)
             latestOnReady.value()
         }.onFailure {
             android.util.Log.e("WidgetPreview", "Failed to render ${type.key} preview", it)

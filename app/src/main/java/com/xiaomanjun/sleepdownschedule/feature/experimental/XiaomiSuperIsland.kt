@@ -234,11 +234,15 @@ internal object XiaomiSuperIsland {
                 .put("actionIntent",
                     "intent:#Intent;component=$packageName/.MainActivity;end"))
             .put("timerInfo", timerInfo(timerAt, nowMillis))
-        return JSONObject().put("param_v2", JSONObject()
+        val parameters = JSONObject()
             .put("protocol", 1)
             .put("business", "course_reminder")
-            .put("enableFloat", beforeClass || payload.kind == LiveUpdateKind.TOMORROW)
-            .put("islandFirstFloat", !beforeClass)
+            .put(
+                "enableFloat",
+                beforeClass ||
+                    (payload.duringClassEnabled && status.phase in setOf(LiveUpdatePhase.IN_CLASS, LiveUpdatePhase.BREAK)) ||
+                    payload.kind == LiveUpdateKind.TOMORROW
+            )
             .put("updatable", true)
             .put("outEffectSrc", if (options.expandGlow) "outer_glow" else "")
             .put("aodTitle", aodText)
@@ -248,7 +252,8 @@ internal object XiaomiSuperIsland {
             .put("picInfo", JSONObject().put("type", 1).put("pic", ""))
             .put("hintInfo", hint)
             .put("param_island", island)
-        ).toString()
+        if (!beforeClass) parameters.put("islandFirstFloat", true)
+        return JSONObject().put("param_v2", parameters).toString()
     }
 
     private fun timerInfo(timerAt: Long?, nowMillis: Long): JSONObject = JSONObject().apply {

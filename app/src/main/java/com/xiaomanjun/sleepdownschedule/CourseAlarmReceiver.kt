@@ -1,7 +1,7 @@
 package com.xiaomanjun.sleepdownschedule
 
 import com.xiaomanjun.sleepdownschedule.feature.reminder.NotificationScheduler
-import com.xiaomanjun.sleepdownschedule.feature.todo.TodoActivity
+import com.xiaomanjun.sleepdownschedule.MainActivity
 import com.xiaomanjun.sleepdownschedule.feature.todo.TodoQuickCaptureContract
 
 import android.app.PendingIntent
@@ -18,6 +18,10 @@ import java.time.LocalTime
 
 class CourseAlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action == "scheduleplus.DISMISS_TODO_REMINDER") {
+            NotificationManagerCompat.from(context).cancel(intent.getLongExtra("todoId", 0L).hashCode())
+            return
+        }
         if (intent.action == NotificationScheduler.ACTION_TODO_REMINDER) {
             val pending = goAsync()
             val app = context.applicationContext as CourseScheduleApp
@@ -26,11 +30,12 @@ class CourseAlarmReceiver : BroadcastReceiver() {
                     val todoId = intent.getLongExtra("todoId", 0L)
                     val scheduledDueAt = intent.getLongExtra("todoDueAt", Long.MIN_VALUE)
                     val item = app.database.todoDao().getById(todoId) ?: return@launch
-                    if (item.isCompleted || item.parentId != null || item.dueAt != scheduledDueAt) return@launch
+                    if (item.deletedAt != null || item.isCompleted || item.parentId != null || item.reminderMode == "NONE" || item.dueAt != scheduledDueAt ||
+                        (intent.hasExtra("todoReminderSignature") && intent.getStringExtra("todoReminderSignature") != com.xiaomanjun.sleepdownschedule.feature.todo.todoReminderSignature(item))) return@launch
                     NotificationScheduler.withShortWakeLock(context, "todo_reminder") {
                         NotificationScheduler.createChannel(context)
                         if (!NotificationScheduler.canPostNotifications(context)) return@withShortWakeLock
-                        val notification = NotificationCompat.Builder(context, NotificationScheduler.channelId())
+                        val notification = NotificationCompat.Builder(context, com.xiaomanjun.sleepdownschedule.feature.todo.todoNotificationChannel(context, item.strongReminder))
                             .setSmallIcon(R.mipmap.ic_launcher)
                             .setContentTitle("待办即将截止：${item.title}")
                             .setContentText(item.description.ifBlank { "请查看待办事项" })
@@ -38,14 +43,19 @@ class CourseAlarmReceiver : BroadcastReceiver() {
                                 PendingIntent.getActivity(
                                     context,
                                     todoId.hashCode(),
-                                    Intent(context, TodoActivity::class.java)
+                                    Intent(context, MainActivity::class.java)
                                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
                                         .putExtra(TodoQuickCaptureContract.EXTRA_OPEN_TODO_ID, todoId)
                                         .setData(Uri.parse("scheduleplus://todo-reminder/$todoId/$scheduledDueAt")),
                                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                                 )
                             )
-                            .setAutoCancel(true)
+                            .setOngoing(item.persistentReminder)
+                            .setAutoCancel(!item.persistentReminder)
+                            .setCategory(if (item.strongReminder) NotificationCompat.CATEGORY_ALARM else NotificationCompat.CATEGORY_REMINDER)
+                            .addAction(0, "结束提醒", PendingIntent.getBroadcast(context, todoId.hashCode(),
+                                Intent(context, CourseAlarmReceiver::class.java).setAction("scheduleplus.DISMISS_TODO_REMINDER").putExtra("todoId", todoId),
+                                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
                             .build()
                         runCatching {
                             NotificationManagerCompat.from(context).notify(todoId.hashCode(), notification)

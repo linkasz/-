@@ -1,5 +1,14 @@
 # Third Party Notices
 
+## kopiro/SiriWave
+
+`feature/agent/voice/SiriWaveGeometry.kt` adapts the iOS9 attenuated, mirrored
+curve algorithm to native Compose Canvas. Real microphone/playback RMS drives
+the amplitude; pending-network dots are a separate status indicator.
+Source: https://github.com/kopiro/siriwave/blob/master/src/ios9-curve.ts
+License: MIT, Copyright (c) 2020 Flavio Maria De Stefano.
+Full license retained in `licenses/SiriWave-MIT.txt`.
+
 ## HaoZai000/NexioSchedule
 
 The progressive top-bar blur shaders in `glass/ui/NexioProgressiveBlur.kt` are

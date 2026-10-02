@@ -3,6 +3,12 @@ package com.xiaomanjun.sleepdownschedule.core.ui.designsystem
 import com.xiaomanjun.sleepdownschedule.ScheduleConfigEntity
 import com.xiaomanjun.sleepdownschedule.glass.*
 import com.xiaomanjun.sleepdownschedule.glass.ui.appUsesDarkTheme
+import com.xiaomanjun.sleepdownschedule.glass.ui.glassUsesLightStyle
+import com.xiaomanjun.sleepdownschedule.glass.ui.courseCardGlassEffectFrame
+import com.xiaomanjun.sleepdownschedule.glass.ui.courseGlassTintAlpha
+import com.xiaomanjun.sleepdownschedule.glass.ui.courseCardBrightnessAttenuation
+import com.xiaomanjun.sleepdownschedule.glass.ui.presetCourseCardHighlight
+import com.xiaomanjun.sleepdownschedule.core.performance.LocalGlassQuality
 
 import android.os.Build
 import androidx.compose.animation.AnimatedContent
@@ -15,6 +21,7 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
@@ -42,7 +49,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
@@ -138,6 +149,7 @@ fun SleepDownPickerDialog(
     scrollableContent: Boolean = false,
     smoothContentResize: Boolean = false,
     bottomActions: (@Composable () -> Unit)? = null,
+    readableSurface: Boolean = true,
     content: @Composable ColumnScope.() -> Unit
 ) {
     val visuals = rememberCenteredDialogVisuals(
@@ -157,7 +169,11 @@ fun SleepDownPickerDialog(
         enableWindowDim = enableWindowDim,
         backgroundColor = Color.Transparent,
         forceCenter = true,
-        surfaceModifier = visuals.surfaceModifier,
+        // Nested pickers sit above another form: a readable inner tint prevents its text showing through.
+        // Keep the shared blur, rounded glass edge and entrance animation underneath this tint.
+        surfaceModifier = if (readableSurface) visuals.surfaceModifier.background(
+            (if (appUsesDarkTheme(config)) Color(0xFF1D1F23) else Color(0xFFFAFBFC)).copy(alpha = 0.96f)
+        ) else visuals.surfaceModifier,
         backgroundModifier = visuals.backgroundModifier,
         animationProgressState = visuals.animationProgress,
         enablePredictiveBackAnimation = false,
@@ -173,7 +189,8 @@ fun SleepDownPickerDialog(
         )
     ) {
         androidx.compose.runtime.CompositionLocalProvider(
-            androidx.compose.material3.LocalContentColor provides foreground
+            androidx.compose.material3.LocalContentColor provides foreground,
+            com.xiaomanjun.sleepdownschedule.glass.ui.LocalReadablePanelControls provides readableSurface
         ) {
             Column(
                 modifier = Modifier
@@ -381,7 +398,8 @@ internal fun Modifier.quickSheetBackdropModifier(
     config: ScheduleConfigEntity,
     blurRadius: Dp,
     inner: Boolean = false,
-    centered: Boolean = false
+    centered: Boolean = false,
+    courseCardStyle: Boolean = false
 ): Modifier {
     val shape = when {
         inner -> RoundedRectangle(SleepDownDesignTokens.QuickSheet.InnerCorner)
@@ -395,6 +413,99 @@ internal fun Modifier.quickSheetBackdropModifier(
         )
     }
     val dark = appUsesDarkTheme(config)
+    if (courseCardStyle) {
+        val lightGlass = glassUsesLightStyle(config)
+        val hasWallpaper = !config.wallpaperUri.isNullOrBlank()
+        val quality = LocalGlassQuality.current
+        val baseColor = if (lightGlass) Color.White else Color(0xFF202124)
+        val rimColor = if (lightGlass) Color.Black.copy(alpha = 0.10f) else Color.White.copy(alpha = 0.24f)
+        val shapeBorderColor = if (lightGlass) Color.White.copy(alpha = 0.72f) else Color.White.copy(alpha = 0.18f)
+        val blur = (config.courseCardBlur * 0.52f).coerceIn(0f, 12f)
+        val tokens = GlassMaterialSpec.courseCard(blur)
+        val effectFrame = courseCardGlassEffectFrame(
+            tokens = tokens,
+            liveBlur = blur,
+            quality = quality,
+            hasWallpaper = hasWallpaper,
+            refractionStrength = config.courseCardRefractionStrength
+        )
+        val tintStrength = if (hasWallpaper && config.courseCardOutlineLightEnabled) 0.75f else config.cardAlpha
+        val tintAlpha = courseGlassTintAlpha(tintStrength, quality, hasWallpaper) *
+            courseCardBrightnessAttenuation(
+                config.wallpaperBrightness,
+                hasWallpaper && config.courseCardOutlineLightEnabled
+            )
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || backdrop == null) {
+            return this
+                .shadow(8.dp, shape, clip = false)
+                .clip(shape)
+                .background(baseColor.copy(alpha = if (hasWallpaper) 0.96f else 0.98f))
+                .border(0.8.dp, rimColor, shape)
+        }
+        val material = tokens.copy(
+            surfaceAlpha = tintAlpha,
+            borderAlpha = 0.22f,
+            highlightAlpha = effectFrame.highlight?.alpha ?: tokens.highlightAlpha
+        )
+        val descriptor = rememberGlassSurfaceDescriptor(
+            debugLabel = "TodoEditorCourseGlassSheet",
+            domain = GlassBackdropDomain.DialogBridge,
+            materialRole = GlassMaterialRole.CourseCard,
+            sceneKey = "todo-editor-course-glass-sheet"
+        )
+        val outlineEnabled = hasWallpaper && config.courseCardOutlineLightEnabled
+        val courseSurface = sleepDownGlassSurface(
+            backdrop = backdrop,
+            descriptor = descriptor,
+            material = material,
+            shape = { shape },
+            effectFrame = effectFrame,
+            backdropSampleScale = 0.82f,
+            cacheDecorations = true,
+            effectsOverride = {
+                effectFrame.blur?.let { blur(it.toPx()) }
+                effectFrame.lensHeight?.let { height ->
+                    effectFrame.lensAmount?.let { amount ->
+                        lens(height.toPx(), amount.toPx(), chromaticAberration = effectFrame.chromaticAberration)
+                    }
+                }
+            },
+            onDrawSurface = {
+                drawRect(baseColor.copy(alpha = tintAlpha))
+                drawRect(
+                    Color.White.copy(alpha = if (lightGlass) 0.035f else 0.055f),
+                    blendMode = androidx.compose.ui.graphics.BlendMode.Screen
+                )
+                drawRect(
+                    brush = Brush.verticalGradient(
+                        0f to Color.White.copy(alpha = if (lightGlass) 0.14f else 0.12f),
+                        0.26f to Color.White.copy(alpha = if (lightGlass) 0.035f else 0.025f),
+                        1f to Color.Transparent
+                    )
+                )
+                if (outlineEnabled) {
+                    drawRect(
+                        brush = Brush.verticalGradient(
+                            0f to Color.White.copy(alpha = 0.12f * tintAlpha.coerceAtLeast(0.25f)),
+                            0.10f to Color.Transparent,
+                            0.82f to Color.Transparent,
+                            1f to Color.White.copy(alpha = 0.20f * tintAlpha.coerceAtLeast(0.25f))
+                        )
+                    )
+                }
+            }
+        )
+        return this
+            .shadow(8.dp, shape, clip = false)
+            .clip(shape)
+            .then(courseSurface)
+            .border(0.8.dp, shapeBorderColor, shape)
+            .presetCourseCardHighlight(
+                shape = shape,
+                alpha = (effectFrame.highlight?.alpha ?: tokens.highlightAlpha) * 0.82f,
+                enabled = { true }
+            )
+    }
     // Centered dialogs are the SleepDown v2 neutral shell with a slightly softer blur. Bottom
     // sheets and their nested quick settings cards keep their original blur budget unchanged.
     val effectiveBlurRadius = when {
@@ -545,14 +656,18 @@ internal fun QuickSheetLiquidAction(
     modifier: Modifier = Modifier,
     primary: Boolean = false,
     destructive: Boolean = false,
-    height: Dp = 38.dp,
+    accented: Boolean = false,
+    height: Dp = SleepDownDesignTokens.Button.MinimumTouchSize,
     onClick: () -> Unit
 ) {
     val actionModifier = if (modifier == Modifier) Modifier.width(84.dp) else modifier
     val centeredAction = height == SleepDownDesignTokens.CenteredDialog.ActionHeight
-    if (backdrop != null) {
+    // A nested action must not lens the text of the settings page through its modal surface.
+    if (backdrop != null && !com.xiaomanjun.sleepdownschedule.glass.ui.LocalReadablePanelControls.current) {
         val dark = appUsesDarkTheme(config)
-        val neutralSurface = if (centeredAction && dark) {
+        val neutralSurface = if (accented) {
+            Color.White.copy(alpha = 0.90f)
+        } else if (centeredAction && dark) {
             Color(0xFF363639)
         } else if (centeredAction) {
             Color(0xFFD6D9DF).copy(alpha = 0.80f)
@@ -562,26 +677,27 @@ internal fun QuickSheetLiquidAction(
             Color(0xFFF3F6FB).copy(alpha = 0.90f)
         }
         val actionSurfaceColor = when {
-            primary && dark -> Color(0xFF099AFF)
-            primary -> Color(0xFF0A84FF).copy(alpha = 0.88f)
+            primary -> SleepDownDesignTokens.Button.Primary.copy(alpha = 0.94f)
             destructive && !centeredAction -> Color(0xFFFF453A).copy(alpha = 0.88f)
             else -> neutralSurface
         }
         val actionTint = when {
-            primary && dark -> Color(0xFF099AFF)
-            primary -> Color(0xFF0A84FF)
+            primary -> SleepDownDesignTokens.Button.Primary
             destructive && !centeredAction -> Color(0xFFFF453A)
+            accented -> SleepDownDesignTokens.Button.Primary
             else -> Color.Unspecified
         }
         val actionTextColor = when {
             primary -> Color.White
+            destructive && !centeredAction -> Color.White
             destructive -> Color(0xFFFF453A)
+            accented -> SleepDownDesignTokens.Button.Primary
             else -> MaterialTheme.colorScheme.onSurface
         }
         LiquidButton(
             onClick = { if (enabled) onClick() },
             backdrop = backdrop,
-            modifier = actionModifier,
+            modifier = actionModifier.alpha(if (enabled) 1f else .46f).semantics { if (!enabled) disabled() },
             height = height,
             blurRadius = 12.dp,
             lensHeight = 4.dp,
@@ -601,8 +717,8 @@ internal fun QuickSheetLiquidAction(
         val dark = appUsesDarkTheme(config)
         val background = when {
             destructive && !centeredAction -> Color(0xFFFF453A)
-            primary && dark -> Color(0xFF099AFF)
-            primary -> Color(0xFF0A84FF)
+            primary -> SleepDownDesignTokens.Button.Primary
+            accented -> Color.White
             centeredAction && dark -> Color(0xFF363639)
             centeredAction -> Color(0xFFE6E8EC)
             dark -> Color(0xFF30343D)
@@ -610,7 +726,9 @@ internal fun QuickSheetLiquidAction(
         }
         val buttonTextColor = when {
             primary -> Color.White
+            destructive && !centeredAction -> Color.White
             destructive -> Color(0xFFFF453A)
+            accented -> SleepDownDesignTokens.Button.Primary
             else -> MaterialTheme.colorScheme.onSurface
         }
         Box(

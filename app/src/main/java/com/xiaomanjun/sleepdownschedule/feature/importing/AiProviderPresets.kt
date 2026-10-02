@@ -263,7 +263,7 @@ object AiProviderPresets {
         availableModels = codexCompatibleModelIds
     )
 
-    val selectable = listOf(none, dailyFree, openAI, deepSeek, mimo, custom)
+    val selectable = listOf(none, openAI, deepSeek, dashScope, siliconFlow, zhipu, mimo, custom)
 
     val all = listOf(none, dailyFree, openAI, deepSeek, dashScope, kimi, zhipu, qianfan, doubao, hunyuan, siliconFlow, miniMax, mimo, mimoTokenPlan, custom)
 

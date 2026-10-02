@@ -1,5 +1,7 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import java.security.MessageDigest
+import java.io.File
+import java.util.Properties
 import java.util.regex.Pattern
 
 plugins {
@@ -13,19 +15,34 @@ plugins {
     id("androidx.baselineprofile")
 }
 
+val userHome = System.getenv("USERPROFILE")?.takeIf(String::isNotBlank)
+    ?: System.getProperty("user.home")
+val signingPropertiesFile = providers.environmentVariable("SCHEDULEPLUS_SIGNING_PROPERTIES")
+    .orNull?.let(::file) ?: File(userHome, ".scheduleplus/signing.properties")
+val localSigningProperties = Properties().apply {
+    if (signingPropertiesFile.isFile) signingPropertiesFile.inputStream().use(::load)
+}
 fun releaseSecret(propertyName: String, environmentName: String): String? =
     providers.gradleProperty(propertyName)
         .orElse(providers.environmentVariable(environmentName))
-        .orNull
+        .orNull ?: localSigningProperties.getProperty(propertyName)
 
 val releaseStoreFilePath = releaseSecret("sleepdown.releaseStoreFile", "SLEEPDOWN_RELEASE_STORE_FILE")
 val releaseStorePassword = releaseSecret("sleepdown.releaseStorePassword", "SLEEPDOWN_RELEASE_STORE_PASSWORD")
 val releaseKeyAlias = releaseSecret("sleepdown.releaseKeyAlias", "SLEEPDOWN_RELEASE_KEY_ALIAS")
 val releaseKeyPassword = releaseSecret("sleepdown.releaseKeyPassword", "SLEEPDOWN_RELEASE_KEY_PASSWORD")
 val remoteConfigSecret = releaseSecret("sleepdown.remoteConfigSecret", "SLEEPDOWN_REMOTE_CONFIG_SECRET").orEmpty()
+val vivoCourseScene = providers.gradleProperty("sleepdown.vivoCourseScene").orElse("").get()
+val vivoApprovedCertSha256 = providers.gradleProperty("sleepdown.vivoApprovedCertSha256").orElse("").get()
+require(vivoCourseScene.isEmpty() || Regex("[A-Z][A-Z0-9_]*").matches(vivoCourseScene)) {
+    "sleepdown.vivoCourseScene must be the exact approved vivo scene identifier"
+}
+require(vivoApprovedCertSha256.isEmpty() || Regex("[A-Fa-f0-9]{64}").matches(vivoApprovedCertSha256)) {
+    "sleepdown.vivoApprovedCertSha256 must be the approved signing certificate SHA-256"
+}
 val schedulePlusApplicationId = "com.scheduleplus.student"
-val sleepDownVersionName = providers.gradleProperty("sleepdown.versionName").orElse("1.2.7").get()
-val sleepDownVersionCode = providers.gradleProperty("sleepdown.versionCode").map { it.toInt() }.getOrElse(34)
+val sleepDownVersionName = providers.gradleProperty("sleepdown.versionName").orElse("1.0.1").get()
+val sleepDownVersionCode = providers.gradleProperty("sleepdown.versionCode").map { it.toInt() }.getOrElse(36)
 val skipReleaseResourceShrink = providers.gradleProperty("sleepdown.skipReleaseResourceShrink")
     .map(String::toBoolean)
     .getOrElse(false)
@@ -75,6 +92,8 @@ android {
         versionCode = sleepDownVersionCode
         versionName = sleepDownVersionName
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("String", "VIVO_COURSE_SCENE", "\"$vivoCourseScene\"")
+        buildConfigField("String", "VIVO_APPROVED_CERT_SHA256", "\"${vivoApprovedCertSha256.uppercase()}\"")
         buildConfigField(
             "boolean",
             "SLEEPDOWN_LARGE_GLASS_EXPERIMENT",
@@ -177,6 +196,23 @@ tasks.configureEach {
     }
 }
 
+// Keep the canonical Release asset name for the updater; export a readable local delivery name.
+tasks.register<Copy>("exportBrandedGithubReleaseApk") {
+    group = "distribution"
+    dependsOn("assembleGithubRelease")
+    from(layout.buildDirectory.file("outputs/apk/github/release/app-github-release.apk"))
+    into(layout.buildDirectory.dir("outputs/delivery"))
+    rename { "时序清单-v$sleepDownVersionName-正式版.apk" }
+}
+
+tasks.register<Copy>("exportBrandedGithubDebugApk") {
+    group = "distribution"
+    dependsOn("assembleGithubDebug")
+    from(layout.buildDirectory.file("outputs/apk/github/debug/app-github-debug.apk"))
+    into(layout.buildDirectory.dir("outputs/delivery"))
+    rename { "时序清单-v$sleepDownVersionName-预览版.apk" }
+}
+
 tasks.register("generateSchedulePlusUpdateManifest") {
     group = "release"
     description = "Build a signed GitHub Release APK and generate its SHA-256 update manifest."
@@ -201,7 +237,7 @@ tasks.register("generateSchedulePlusUpdateManifest") {
         val sha256 = digest.digest().joinToString("") { byte ->
             (byte.toInt() and 0xff).toString(16).padStart(2, '0')
         }
-        val releaseRoot = "https://github.com/linkasz/schedule-plus-android/releases"
+        val releaseRoot = "https://github.com/linkasz/-/releases"
         val output = layout.buildDirectory.file("outputs/release-manifest/scheduleplus-update.json").get().asFile
         output.parentFile.mkdirs()
         output.writeText(
@@ -232,7 +268,8 @@ ksp {
 }
 
 dependencies {
-    val composeBom = platform("androidx.compose:compose-bom:2024.10.00")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    val composeBom = platform("androidx.compose:compose-bom:2026.05.00")
     implementation(composeBom)
     androidTestImplementation(composeBom)
 

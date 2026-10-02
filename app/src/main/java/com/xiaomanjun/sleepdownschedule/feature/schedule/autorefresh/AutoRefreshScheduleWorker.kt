@@ -3,8 +3,11 @@ package com.xiaomanjun.sleepdownschedule.feature.schedule.autorefresh
 import android.content.Context
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
+import androidx.work.BackoffPolicy
 import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
@@ -18,12 +21,26 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.TimeUnit
+import java.io.IOException
 
 internal data class AutoRefreshOutcome(
     val success: Boolean,
     val message: String,
-    val profile: AutoRefreshScheduleProfile? = null
+    val profile: AutoRefreshScheduleProfile? = null,
+    val retryable: Boolean = false
 )
+
+internal const val AutoRefreshMaxRetryAttempts = 4
+
+internal fun autoRefreshErrorIsRetryable(error: Throwable): Boolean {
+    if (error is TimeoutCancellationException || error is IOException) return true
+    val message = error.message.orEmpty()
+    return listOf("网络", "超时", "连接失败", "页面加载失败", "校园网", "VPN", "timed out", "connection reset")
+        .any { message.contains(it, ignoreCase = true) }
+}
+
+internal fun shouldRetryAutoRefresh(outcome: AutoRefreshOutcome, runAttemptCount: Int): Boolean =
+    !outcome.success && outcome.retryable && runAttemptCount < AutoRefreshMaxRetryAttempts
 
 internal object AutoRefreshScheduleCoordinator {
     private val refreshMutex = Mutex()
@@ -158,7 +175,8 @@ internal object AutoRefreshScheduleCoordinator {
                 context,
                 profile,
                 error.message?.takeIf(String::isNotBlank)
-                    ?: "刷新失败，请检查网络、账号或教务系统状态"
+                    ?: "刷新失败，请检查网络、账号或教务系统状态",
+                retryable = autoRefreshErrorIsRetryable(error)
             )
         }
     }
@@ -174,7 +192,8 @@ internal object AutoRefreshScheduleCoordinator {
     private fun recordFailure(
         context: Context,
         profile: AutoRefreshScheduleProfile,
-        message: String
+        message: String,
+        retryable: Boolean = false
     ): AutoRefreshOutcome {
         val friendly = when {
             message.contains("timed out", ignoreCase = true) ->
@@ -188,7 +207,7 @@ internal object AutoRefreshScheduleCoordinator {
                 } else current
             }
         }
-        return AutoRefreshOutcome(false, friendly, AutoRefreshScheduleStore.load(context))
+        return AutoRefreshOutcome(false, friendly, AutoRefreshScheduleStore.load(context), retryable)
     }
 }
 
@@ -227,19 +246,27 @@ class AutoRefreshScheduleWorker(
     override suspend fun doWork(): Result {
         val profile = AutoRefreshScheduleStore.load(applicationContext)
         if (profile?.automaticRefreshEnabled != true) return Result.success()
-        AutoRefreshScheduleCoordinator.refreshSaved(applicationContext)
-        return Result.success()
+        val outcome = AutoRefreshScheduleCoordinator.refreshSaved(applicationContext)
+        return if (shouldRetryAutoRefresh(outcome, runAttemptCount)) Result.retry() else Result.success()
     }
 
     companion object {
         private const val WorkName = "schedule_api_auto_refresh"
+        private const val InitialWorkName = "schedule_api_auto_refresh_initial"
 
-        internal fun updateSchedule(context: Context, profile: AutoRefreshScheduleProfile?) {
+        internal fun updateSchedule(
+            context: Context,
+            profile: AutoRefreshScheduleProfile?,
+            runImmediately: Boolean = false
+        ) {
             enqueue(context, profile, ExistingPeriodicWorkPolicy.UPDATE)
+            if (runImmediately && profile?.automaticRefreshEnabled == true) {
+                enqueueInitialRefresh(context)
+            }
         }
 
         internal fun ensureSchedule(context: Context, profile: AutoRefreshScheduleProfile?) {
-            enqueue(context, profile, ExistingPeriodicWorkPolicy.UPDATE)
+            enqueue(context, profile, ExistingPeriodicWorkPolicy.KEEP)
         }
 
         private fun enqueue(
@@ -250,16 +277,16 @@ class AutoRefreshScheduleWorker(
             val manager = WorkManager.getInstance(context.applicationContext)
             if (profile?.automaticRefreshEnabled != true) {
                 manager.cancelUniqueWork(WorkName)
+                manager.cancelUniqueWork(InitialWorkName)
                 return
             }
             val minutes = AutoRefreshFrequency.normalize(profile.frequencyMinutes)
             val request = PeriodicWorkRequestBuilder<AutoRefreshScheduleWorker>(minutes, TimeUnit.MINUTES)
                 .setConstraints(
-                    Constraints.Builder()
-                        .setRequiredNetworkType(NetworkType.CONNECTED)
-                        .build()
+                    networkConstraints()
                 )
                 .setInitialDelay(minutes, TimeUnit.MINUTES)
+                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30L, TimeUnit.SECONDS)
                 .build()
             manager.enqueueUniquePeriodicWork(
                 WorkName,
@@ -267,5 +294,21 @@ class AutoRefreshScheduleWorker(
                 request
             )
         }
+
+        private fun enqueueInitialRefresh(context: Context) {
+            val request = OneTimeWorkRequestBuilder<AutoRefreshScheduleWorker>()
+                .setConstraints(networkConstraints())
+                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30L, TimeUnit.SECONDS)
+                .build()
+            WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
+                InitialWorkName,
+                ExistingWorkPolicy.KEEP,
+                request
+            )
+        }
+
+        private fun networkConstraints() = Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.CONNECTED)
+            .build()
     }
 }

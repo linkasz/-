@@ -4,6 +4,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -179,15 +180,16 @@ internal fun Modifier.homeSwitchGroup(cardOrderFraction: Float? = null): Modifie
             group.intValue = (fraction * SwitchGroupCount).toInt().coerceIn(0, SwitchGroupCount - 1)
         }
     }
-    // At rest the translation is zero. Releasing this layer keeps card glass in the same
-    // clipping stack as its wallpaper sampler; the six staggered tracks are kept for motion.
-    return if (pages.any { it.motion.moving }) tracked.graphicsLayer {
-        translationX = pages.sumOf { page ->
+    // Keep the modifier/node topology stable across reversals. Removing the layer at rest
+    // reparents retained glass/icon nodes; repeated switches can leave their pixels displaced.
+    // An identity layer needs no clip, effect or offscreen buffer when motion has settled.
+    return tracked.graphicsLayer {
+        translationX = if (pages.any { it.motion.moving }) pages.sumOf { page ->
             (page.direction * page.width.value *
                 (page.motion.progress.value - page.motion.groupProgress(group.intValue))).toDouble()
-        }.toFloat()
+        }.toFloat() else 0f
         clip = false
-    } else tracked
+    }
 }
 
 @Composable
@@ -243,6 +245,34 @@ internal fun HomeSwitchPane(
             LocalHomeBackgroundFrozen provides (LocalHomeBackgroundFrozen.current || !visible),
             LocalHomeTextContrastFrozen provides (LocalHomeTextContrastFrozen.current || !visible)
         ) { content() }
+    }
+}
+
+/** Secondary tabs reuse the course page's six springs, without stacking another entrance on root navigation. */
+@Composable
+internal fun HomePageEntrance(animateOnMount: Boolean, entranceDirection: Float = 1f, content: @Composable () -> Unit) {
+    val target = remember { mutableStateOf(false) }
+    val motion = remember { HomeSwitchMotion(animateOnMount, target) }
+    LaunchedEffect(motion) { motion.animateTo(false) }
+    val width = remember { mutableIntStateOf(0) }
+    // Capture the dock direction for this pane; an outgoing pane must not jump on the next selection.
+    val mountingDirection = remember { entranceDirection }
+    val direction = mountingDirection * if (LocalLayoutDirection.current == LayoutDirection.Rtl) -1f else 1f
+    val parents = LocalSwitchPages.current
+    val pages = remember(parents, motion, direction) { parents + SwitchPageScope(motion, width, -direction) }
+    val parentKey = LocalGlassSampleRecordKey.current
+    val sampleKey = remember(parentKey, motion) { { Pair(parentKey(), motion.sampleKey) } }
+    // Read frame progress in the layer, so staggered motion does not recompose the task list each frame.
+    // Retain this node too: child glass nodes must not be reparented at each spring endpoint.
+    val layer = Modifier.graphicsLayer {
+        translationX = if (motion.moving) direction * width.intValue * motion.progress.value else 0f
+        clip = motion.moving
+        shape = if (clip) RoundedCornerShape(32.dp * motion.cornerFraction) else RectangleShape
+    }
+    Box(Modifier.fillMaxSize().onSizeChanged { width.intValue = it.width }.then(layer)) {
+        CompositionLocalProvider(LocalSwitchPages provides pages,
+            LocalGlassSampleRecordKey provides sampleKey,
+            LocalHomeTextContrastFrozen provides (LocalHomeTextContrastFrozen.current || motion.moving)) { content() }
     }
 }
 

@@ -282,6 +282,9 @@ internal fun GlassMiuixTabletDetailPaneScaffold(
 internal fun GlassMiuixDetailActivityScaffold(
     title: String,
     config: ScheduleConfigEntity,
+    useSettingsBackground: Boolean,
+    backgroundContent: @Composable () -> Unit,
+    backgroundOverlayContent: @Composable () -> Unit,
     onBack: () -> Unit,
     showTopGradientBlur: Boolean,
     isolateContentFromBackdrop: Boolean,
@@ -294,8 +297,8 @@ internal fun GlassMiuixDetailActivityScaffold(
     topBarActions: @Composable (Backdrop?) -> Unit,
     content: @Composable (Backdrop?) -> Unit
 ) {
-    val pageConfig = settingsVisualConfig(config)
-    val pageColor = settingsPageBackground(pageConfig)
+    val pageConfig = if (useSettingsBackground) settingsVisualConfig(config) else config
+    val pageColor = if (useSettingsBackground) settingsPageBackground(pageConfig) else Color.White
     val backgroundBackdrop = rememberGlassLayerBackdrop(
         domain = GlassBackdropDomain.Background,
         providerId = "settings-detail-background"
@@ -307,7 +310,8 @@ internal fun GlassMiuixDetailActivityScaffold(
         drawRect(pageColor)
         drawContent()
     }
-    val topBarBackdrop = topBarBackdropOverride ?: contentBackdrop
+    val topBarBackdrop = topBarBackdropOverride
+        ?: if (useSettingsBackground) contentBackdrop else backgroundBackdrop
     val scrollBehavior = rememberSettingsScrollBehavior()
     val density = LocalDensity.current
     val rootView = LocalView.current
@@ -344,19 +348,21 @@ internal fun GlassMiuixDetailActivityScaffold(
         Box(
             Modifier
                 .fillMaxSize()
-                .background(settingsPageBackground(pageConfig))
+                .background(pageColor)
         ) {
             Box(
                 Modifier
                     .fillMaxSize()
-                    .background(settingsPageBackground(pageConfig))
                     .glassBackdropProducer(backgroundBackdrop)
-            )
+            ) {
+                backgroundContent()
+            }
+            backgroundOverlayContent()
             Scaffold(
                 modifier = Modifier.fillMaxSize(),
                 underlayModifier = Modifier
                     .fillMaxSize()
-                    .background(settingsPageBackground(pageConfig))
+                    .background(if (useSettingsBackground) pageColor else Color.Transparent)
                     .centeredDialogSceneProducer(dialogSceneBackdrop),
                 containerColor = Color.Transparent,
                 contentWindowInsets = WindowInsets(0, 0, 0, 0),

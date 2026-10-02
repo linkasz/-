@@ -3,6 +3,8 @@ package com.xiaomanjun.sleepdownschedule
 import com.xiaomanjun.sleepdownschedule.feature.reminder.LiveUpdatePayload
 import com.xiaomanjun.sleepdownschedule.feature.reminder.NotificationScheduler
 import com.xiaomanjun.sleepdownschedule.feature.experimental.XiaomiSuperIsland
+import com.xiaomanjun.sleepdownschedule.feature.experimental.VivoAtomicIsland
+import com.xiaomanjun.sleepdownschedule.feature.reminder.LiveUpdateKind
 
 import android.app.Service
 import android.content.Intent
@@ -45,6 +47,13 @@ class LiveUpdateForegroundService : Service() {
                 }
                 NotificationScheduler.createChannel(this)
                 val payload = intent?.toLiveUpdatePayload() ?: restorePayload()
+                if (payload?.kind == LiveUpdateKind.COURSE && VivoAtomicIsland.isAvailable(this)) {
+                    // A previously queued service start must not repost the ordinary notification.
+                    refreshJob?.cancel()
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
+                    return START_NOT_STICKY
+                }
                 val renderedAtMillis = System.currentTimeMillis()
                 val notification = payload?.buildNotification(this)
                     ?: NotificationScheduler.notificationFromIntent(intent ?: Intent())
@@ -83,6 +92,11 @@ class LiveUpdateForegroundService : Service() {
                     break
                 }
                 val payload = activePayload ?: break
+                if (payload.kind == LiveUpdateKind.COURSE && VivoAtomicIsland.isAvailable(this@LiveUpdateForegroundService)) {
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
+                    break
+                }
                 if (payload.shouldStop()) {
                     clearStoredPayload()
                     stopForeground(STOP_FOREGROUND_REMOVE)

@@ -25,6 +25,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.util.fastCoerceIn
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 class InteractiveHighlight(
@@ -48,6 +49,7 @@ class InteractiveHighlight(
     private var inputGeneration = 0L
     private var externalPressActive = false
     private var exactExternalPosition by mutableStateOf<Offset?>(null)
+    private var externalPositionJob: Job? = null
     val pressProgress: Float get() = pressProgressAnimation.value
     val offset: Offset get() = positionAnimation.value - startPosition
 
@@ -137,6 +139,7 @@ half4 main(float2 coord) {
             // Release work is intentionally asynchronous so the spring can finish after UP. A
             // newer DOWN must invalidate this queued release before it can cancel the new press.
             if (generation != inputGeneration) return@launch
+            externalPositionJob?.cancel()
             launch { pressProgressAnimation.animateTo(0f, pressProgressAnimationSpec) }
             launch { positionAnimation.animateTo(startPosition, positionAnimationSpec) }
         }
@@ -158,13 +161,19 @@ half4 main(float2 coord) {
             } else {
                 inputGeneration
             }
-            if (newPress) startPosition = position
-            animationScope.launch {
-                if (generation != inputGeneration) return@launch
-                launch { pressProgressAnimation.animateTo(1f, pressProgressAnimationSpec) }
-                launch {
-                    if (newPress) positionAnimation.snapTo(position)
-                    else positionAnimation.animateTo(position, positionAnimationSpec)
+            if (newPress) {
+                startPosition = position
+                externalPositionJob?.cancel()
+                externalPositionJob = animationScope.launch {
+                    if (generation != inputGeneration) return@launch
+                    launch { pressProgressAnimation.animateTo(1f, pressProgressAnimationSpec) }
+                    launch { positionAnimation.snapTo(position) }
+                }
+            } else if (!followPointerExactly) {
+                externalPositionJob?.cancel()
+                externalPositionJob = animationScope.launch {
+                    if (generation != inputGeneration) return@launch
+                    positionAnimation.animateTo(position, positionAnimationSpec)
                 }
             }
         } else if (externalPressActive) {
@@ -180,6 +189,7 @@ half4 main(float2 coord) {
     val gestureModifier: Modifier =
         Modifier.pointerInput(animationScope) {
             var gestureAccepted = false
+            var gestureSettled = false
             var gestureGeneration = inputGeneration
             try {
                 inspectDragGestures(
@@ -191,9 +201,11 @@ half4 main(float2 coord) {
                         )
                         if (!gestureAccepted) {
                             settle(gestureGeneration)
+                            gestureSettled = true
                             return@inspectDragGestures
                         }
                         startPosition = down.position
+                        exactExternalPosition = down.position
                         animationScope.launch {
                             if (gestureGeneration != inputGeneration) return@launch
                             launch { pressProgressAnimation.animateTo(1f, pressProgressAnimationSpec) }
@@ -201,28 +213,34 @@ half4 main(float2 coord) {
                         }
                     },
                     onDragEnd = {
-                        if (gestureAccepted) settle(gestureGeneration)
+                        if (gestureAccepted) {
+                            exactExternalPosition = null
+                            settle(gestureGeneration)
+                        }
                         gestureAccepted = false
+                        gestureSettled = true
                     },
                     onDragCancel = {
-                        if (gestureAccepted) settle(gestureGeneration)
+                        if (gestureAccepted) {
+                            exactExternalPosition = null
+                            settle(gestureGeneration)
+                        }
                         gestureAccepted = false
+                        gestureSettled = true
                     }
                 ) { change, _ ->
                     if (gestureAccepted) {
-                        val updateGeneration = gestureGeneration
-                        animationScope.launch {
-                            if (updateGeneration == inputGeneration) {
-                                positionAnimation.snapTo(change.position)
-                            }
-                        }
+                        exactExternalPosition = change.position
                     }
                 }
             } finally {
                 // Window focus changes can cancel pointer input without delivering an up/cancel.
                 // Always settle so a resumed LiquidButton cannot keep a stale translation/scale.
-                val cancellationGeneration = ++inputGeneration
-                settle(cancellationGeneration)
+                exactExternalPosition = null
+                if (!gestureSettled && gestureAccepted) {
+                    val cancellationGeneration = ++inputGeneration
+                    settle(cancellationGeneration)
+                }
             }
         }
 }

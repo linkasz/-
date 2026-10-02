@@ -73,7 +73,7 @@ object BackupCodec {
         } catch (error: BackupCodecException) {
             throw error
         } catch (error: Exception) {
-            throw BackupCodecException("写入 SleepDown 备份失败", error)
+            throw BackupCodecException("写入时序清单备份失败", error)
         }
     }
 
@@ -390,7 +390,7 @@ object BackupCodec {
         if (manifest.formatVersion != BackupFormatV1.FORMAT_VERSION) {
             fail("无法读取 formatVersion=${manifest.formatVersion} 的备份")
         }
-        if (manifest.product != BackupFormatV1.PRODUCT) fail("不是 SleepDown Backup 文件")
+        if (manifest.product !in setOf(BackupFormatV1.PRODUCT, BackupFormatV1.LEGACY_PRODUCT)) fail("不是时序清单备份文件")
         validateShortText("createdAt", manifest.createdAt, allowBlank = false)
         validateShortText("sourceAppVersionName", manifest.sourceAppVersionName, allowBlank = false)
         validateShortText("sourcePackageName", manifest.sourcePackageName, allowBlank = false)
@@ -564,13 +564,39 @@ object BackupCodec {
             if (group.position < 0) fail("todo group position 非法")
         }
         validateUniqueIds(data.todoItems.map { it.id }, BackupStableId.TODO_PREFIX, "todo")
+        val calendarSyncTokens = HashSet<String>()
         val todosById = data.todoItems.associateBy { it.id }
         val courseIds = data.schedules.flatMapTo(HashSet()) { schedule -> schedule.courses.map { it.id } }
         data.todoItems.forEach { todo ->
             validateText("todo title", todo.title, allowBlank = false)
             validateText("todo description", todo.description)
             if (todo.priority !in 0..3) fail("todo priority 非法")
+            if (todo.reminderMode !in setOf("LEGACY", "NONE", "BEFORE", "ALL_DAY")) fail("todo reminderMode 非法")
+            if (todo.reminderOffsetMinutes < 0 || todo.reminderTimeMinutes !in 0..1439) fail("todo 提醒时间非法")
+            if (todo.endAt != null && (todo.dueAt == null || todo.allDay || todo.endAt <= todo.dueAt)) fail("todo 时间段非法")
+            if ((todo.deletedAt == null) != (todo.deletionBatch == null)) fail("todo 归档批次不完整")
+            todo.deletionBatch?.let { validateShortText("todo deletionBatch", it, allowBlank = false) }
             if (todo.repeatRule !in setOf("NONE", "DAILY", "WEEKLY", "MONTHLY")) fail("todo repeatRule 非法")
+            todo.calendarSyncToken?.let { token ->
+                if (!token.matches(Regex("(?:[0-9a-fA-F]{32}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"))) {
+                    fail("todo calendarSyncToken 格式非法")
+                }
+                if (!calendarSyncTokens.add(token.lowercase())) fail("todo calendarSyncToken 重复")
+                if (todo.calendarSyncState == null) fail("todo calendarSyncToken 缺少同步状态")
+            }
+            todo.calendarSyncState?.let { syncState ->
+                if (syncState !in com.xiaomanjun.sleepdownschedule.feature.todo.TodoCalendarSyncState.all) {
+                    fail("todo calendarSyncState 非法")
+                }
+                if (syncState == com.xiaomanjun.sleepdownschedule.feature.todo.TodoCalendarSyncState.LINKED && todo.calendarSyncToken == null) {
+                    fail("已关联的 todo 缺少 calendarSyncToken")
+                }
+                if (syncState in setOf(
+                        com.xiaomanjun.sleepdownschedule.feature.todo.TodoCalendarSyncState.CREATING,
+                        com.xiaomanjun.sleepdownschedule.feature.todo.TodoCalendarSyncState.LOCAL_ONLY
+                    ) && todo.calendarSyncToken == null
+                ) fail("todo $syncState 状态缺少 calendarSyncToken")
+            }
             todo.groupId?.let {
                 BackupStableId.requireValid(it, BackupStableId.TODO_GROUP_PREFIX)
                 if (it !in groupIds) fail("todo 引用了不存在的 group")
@@ -617,6 +643,27 @@ object BackupCodec {
             validateShortText("app icon mode", appIcon.mode, allowBlank = false)
         }
         preferences.dayAgent?.let { dayAgent ->
+            validateText("agent persona", dayAgent.personaJson)
+            if (dayAgent.personaLibraryJson.isNotBlank()) {
+                // Backups contain business-only cards; private prompt definitions are never restored.
+                runCatching { Json.decodeFromString<com.xiaomanjun.sleepdownschedule.feature.agent.PersonaLibrary>(dayAgent.personaLibraryJson).validated() }
+                    .getOrElse { fail("人格库格式不正确") }
+                if (dayAgent.personaLibraryJson.contains("\"corePrompt\"")) fail("备份不能包含核心提示词")
+            }
+            if (dayAgent.personaJson.isNotEmpty()) {
+                val persona = runCatching { Json.decodeFromString<com.xiaomanjun.sleepdownschedule.feature.agent.AgentPersona>(dayAgent.personaJson) }
+                    .getOrElse { fail("助理人格格式不正确") }
+                if (persona.name.length > 32 || persona.description.length > 2000) fail("助理人格内容过长")
+            }
+            dayAgent.conversationMetadataBySchedule.forEach { (scheduleId, raw) ->
+                BackupStableId.requireValid(scheduleId, BackupStableId.SCHEDULE_PREFIX)
+                validateText("agent conversation metadata", raw)
+                val items = runCatching { Json.decodeFromString<List<com.xiaomanjun.sleepdownschedule.feature.agent.AgentConversationMeta>>(raw) }
+                    .getOrElse { fail("对话元数据格式不正确") }
+                if (items.map { it.key }.distinct().size != items.size || items.any {
+                    !com.xiaomanjun.sleepdownschedule.feature.agent.validConversationKey(it.key) || it.title.length > 80 || it.title.isBlank()
+                }) fail("对话标识或标题不正确")
+            }
             validateText("day agent memory", dayAgent.memory)
             dayAgent.memoryTurnDay?.let { validateShortText("day agent memoryTurnDay", it) }
             dayAgent.memoryLastAgentUpdateDay?.let { validateShortText("day agent memoryLastAgentUpdateDay", it) }

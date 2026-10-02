@@ -64,6 +64,7 @@ class CourseScheduleApp : Application() {
         AppIconManager.onIconChanged = { TodayCoursesWidgetProvider.refreshAll(this) }
         AppIconManager.applyStoredMode(this)
         AutoRefreshScheduleWorker.ensureSchedule(this, AutoRefreshScheduleStore.load(this))
+        com.xiaomanjun.sleepdownschedule.feature.todo.TodoTrashWorker.schedule(this)
         ActivityTransitionCoordinator.install(this)
         if (BuildConfig.SLEEPDOWN_EXPERIMENTAL_FEATURES) ColorOSCourseBridge.install(this, database)
         if (BuildConfig.SLEEPDOWN_EXPERIMENTAL_FEATURES) {

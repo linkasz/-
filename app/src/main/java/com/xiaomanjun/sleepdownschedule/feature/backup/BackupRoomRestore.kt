@@ -343,7 +343,7 @@ object BackupRoomRestoreMapper {
             ).normalized()
         }
 
-        val todoGroupRows = archive.data.todoGroups.map { group ->
+        val todoGroupRows = archive.data.todoGroups.filterNot { it.name == "收件箱" }.map { group ->
             TodoGroupEntity(
                 id = plan.todoGroupIds.getValue(group.id),
                 name = group.name,
@@ -368,14 +368,33 @@ object BackupRoomRestoreMapper {
                 priority = item.priority,
                 isCompleted = item.isCompleted,
                 isPinned = item.isPinned,
-                groupId = item.groupId?.let(plan.todoGroupIds::getValue),
+                groupId = item.groupId?.takeUnless { groupId -> archive.data.todoGroups.any { it.id == groupId && it.name == "收件箱" } }?.let(plan.todoGroupIds::getValue),
                 parentId = item.parentId?.let(plan.todoIds::getValue),
                 courseId = item.courseId?.let(plan.courseIds::getValue),
                 repeatRule = item.repeatRule,
+                endAt = item.endAt,
+                reminderMode = item.reminderMode,
+                reminderOffsetMinutes = item.reminderOffsetMinutes,
+                reminderTimeMinutes = item.reminderTimeMinutes,
+                persistentReminder = item.persistentReminder,
+                strongReminder = item.strongReminder,
+                deletedAt = item.deletedAt,
+                deletionBatch = item.deletionBatch,
                 createdAt = item.createdAt,
                 updatedAt = item.updatedAt,
                 completedAt = item.completedAt,
-                calendarEventId = null
+                calendarEventId = null,
+                calendarSyncToken = item.calendarSyncToken,
+                calendarSyncState = when (item.calendarSyncState) {
+                    null -> if (item.dueAt != null && item.parentId == null && !item.isCompleted) {
+                        TodoCalendarSyncState.NEEDS_CONFIRMATION
+                    } else {
+                        TodoCalendarSyncState.PENDING
+                    }
+                    TodoCalendarSyncState.CREATING -> TodoCalendarSyncState.NEEDS_CONFIRMATION
+                    TodoCalendarSyncState.LOCAL_ONLY -> TodoCalendarSyncState.NEEDS_CONFIRMATION
+                    else -> item.calendarSyncState
+                }
             )
         }
 

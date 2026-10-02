@@ -13,7 +13,7 @@ internal class AgentToolFactCache {
 
     private fun version(facts: DayAgentFacts) =
         "${facts.sourceHash}:${facts.periodSchemes.hashCode()}:${facts.activePeriodSchemeId}:" +
-            "${facts.timeZoneId}:${facts.utcOffset}"
+            "${facts.timeZoneId}:${facts.utcOffset}:${facts.todos.hashCode()}:${facts.scheduleConfig.hashCode()}"
 
     @Synchronized
     fun read(facts: DayAgentFacts, now: Long): Map<String, AgentToolResult> {
@@ -32,7 +32,9 @@ internal class AgentToolFactCache {
 
     @Synchronized
     fun put(facts: DayAgentFacts, call: AgentToolCall, result: AgentToolResult, now: Long) {
-        if (!result.success || call.name == AgentToolName.UPDATE_MEMORY || result.content.length > 100_000) return
+        // Clock and position are live observations, never facts to carry into another turn.
+        if (!result.success || call.name in setOf(AgentToolName.UPDATE_MEMORY, AgentToolName.GET_CURRENT_TIME,
+                AgentToolName.GET_CURRENT_LOCATION) || result.content.length > 100_000) return
         val version = version(facts)
         val snapshot = snapshots[facts.scheduleId]?.takeIf { it.version == version }
             ?: Snapshot(version, linkedMapOf()).also { snapshots[facts.scheduleId] = it }

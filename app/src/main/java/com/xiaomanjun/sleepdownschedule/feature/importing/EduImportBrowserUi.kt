@@ -412,7 +412,7 @@ private fun aiEduRequestPreview(settings: AiImportSettings, pageTextLength: Int)
             appendLine("DeepSeek max_tokens：393216；MiMo max_completion_tokens：131072（避免思考过程或长 JSON 耗尽输出额度）")
         }
         appendLine("输入文本：$pageTextLength 字符")
-        appendLine("提示词：已附加完整 SleepDown JSON 解析协议与字段示例")
+        appendLine("提示词：已附加完整 时序清单 JSON 解析协议与字段示例")
         append("密钥：已从本机安全存储读取，未显示")
     }
 }
@@ -1226,6 +1226,15 @@ private fun EduImportBrowserScreen(
             }
             installShiguangRuntime(bridge)
             webViewClient = object : WebViewClient() {
+                private fun persistVisibleEduSession(view: WebView?, url: String?) {
+                    val visiblePage = if (isPopup) popupWebView === view else popupWebView == null
+                    if (!visiblePage || view == null || url.isNullOrBlank()) return
+                    val manager = CookieManager.getInstance()
+                    manager.flush()
+                    EduLoginHistoryStore.remember(context, adapter, url, manager.getCookie(url))
+                    loginHistory = EduLoginHistoryStore.load(context)
+                }
+
                 override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest): Boolean {
                     return handleExternalNavigation(request.url)
                 }
@@ -1258,14 +1267,7 @@ private fun EduImportBrowserScreen(
                     if (visiblePage && !url.isNullOrBlank()) {
                         addressText = url
                         onUrlChange(url)
-                        EduLoginHistoryStore.remember(
-                            context,
-                            adapter,
-                            url,
-                            CookieManager.getInstance().getCookie(url)
-                        )
-                        loginHistory = EduLoginHistoryStore.load(context)
-                        CookieManager.getInstance().flush()
+                        persistVisibleEduSession(view, url)
                     }
                     if (visiblePage && view != null) currentPrimaryAction?.onPageFinished?.invoke(view, url)
                 }
@@ -1280,6 +1282,7 @@ private fun EduImportBrowserScreen(
                     val visiblePage = if (isPopup) popupWebView === view else popupWebView == null
                     // Token-based portals can leave their login route without reloading the document.
                     if (visiblePage && view?.progress == 100) {
+                        persistVisibleEduSession(view, url)
                         currentPrimaryAction?.onPageFinished?.invoke(view, url)
                     }
                 }

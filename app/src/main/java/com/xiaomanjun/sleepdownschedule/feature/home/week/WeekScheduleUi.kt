@@ -1339,52 +1339,9 @@ private fun WeekResizeCornerHandle(
 
 @Composable
 fun WeekSwitchButton(direction: Int, config: ScheduleConfigEntity, backdrop: Backdrop?, enabled: Boolean, onClick: () -> Unit) {
-    val lightGlass = glassUsesLightStyle(config)
-    val surfaceColor = if (lightGlass) HomeLightGlassSurfaceColor else ComposeColor(0xFF121212)
-    val textColor = glassForegroundColor(config)
-    if (backdrop != null) {
-        LiquidButton(
-            onClick = { if (enabled) onClick() },
-            backdrop = backdrop,
-            modifier = Modifier
-                .size(34.dp)
-                .excludeHomeAssistantPull()
-                .graphicsLayer(alpha = if (enabled) 1f else 0.35f),
-            isInteractive = enabled,
-            surfaceColor = surfaceColor.copy(alpha = homeChromeGlassSurfaceAlpha(lightGlass)),
-            height = 34.dp,
-            contentPadding = PaddingValues(0.dp),
-            blurRadius = homeChromeBlur(HomeHeaderGlassBlur, config),
-            lensHeight = HomeHeaderGlassLensHeight,
-            lensAmount = HomeHeaderGlassLensAmount,
-            chromaticAberration = false
-        ) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_arrow_back),
-                    contentDescription = if (direction < 0) "上一周" else "下一周",
-                    tint = textColor,
-                    modifier = Modifier.size(18.dp).graphicsLayer(rotationZ = if (direction > 0) 180f else 0f)
-                )
-            }
-        }
-    } else {
-        GlassPill(
-            backdrop = null,
-            config = config,
-            modifier = Modifier.size(34.dp).excludeHomeAssistantPull().graphicsLayer(alpha = if (enabled) 1f else 0.35f),
-            onClick = if (enabled) onClick else null
-        ) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_arrow_back),
-                    contentDescription = if (direction < 0) "上一周" else "下一周",
-                    tint = textColor,
-                    modifier = Modifier.size(18.dp).graphicsLayer(rotationZ = if (direction > 0) 180f else 0f)
-                )
-            }
-        }
-    }
+    com.xiaomanjun.sleepdownschedule.core.ui.designsystem.AppDirectionButton(
+        direction, if (direction < 0) "上一周" else "下一周", config, backdrop, enabled,
+        modifier = Modifier.excludeHomeAssistantPull(), onClick = onClick)
 }
 
 internal enum class WeekdayTodayStyle {

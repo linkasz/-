@@ -221,8 +221,11 @@ private fun AutoRefreshDashboardContent(
     }
     fun updateProfile(transform: (AutoRefreshScheduleProfile) -> AutoRefreshScheduleProfile) {
         runCatching {
+            val previous = AutoRefreshScheduleStore.load(context)
             val updated = AutoRefreshScheduleStore.update(context, transform)
-            AutoRefreshScheduleWorker.updateSchedule(context, updated)
+            val shouldRefreshNow = updated?.automaticRefreshEnabled == true &&
+                previous?.automaticRefreshEnabled != true
+            AutoRefreshScheduleWorker.updateSchedule(context, updated, runImmediately = shouldRefreshNow)
         }.onFailure { message = "设置保存失败，请重试" }
     }
     val lastRefresh = remember(profile.lastRefreshAt) {

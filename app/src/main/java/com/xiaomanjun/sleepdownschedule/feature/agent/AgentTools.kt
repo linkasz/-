@@ -23,7 +23,13 @@ import java.net.URI
  * Agent never depends on one vendor's wire format.
  */
 enum class AgentToolName {
+    GET_MY_COURSES,
+    GET_MY_SCHEDULE,
+    GET_CURRENT_LOCATION,
+    GET_CURRENT_TIME,
     GET_CURRENT_OVERVIEW,
+    GET_DATE_AGENDA,
+    WEATHER_QUICK,
     SEARCH_COURSES,
     GET_WEEK_SCHEDULE,
     GET_SEMESTER_SCHEDULE,
@@ -65,6 +71,11 @@ enum class AgentRunStatusIcon {
 }
 
 internal fun AgentToolName.runStatus(): AgentRunStatus = when (this) {
+    AgentToolName.GET_MY_COURSES, AgentToolName.GET_MY_SCHEDULE -> AgentRunStatus(AgentRunStatusIcon.SCHEDULE, "读取安排")
+    AgentToolName.GET_CURRENT_LOCATION -> AgentRunStatus(AgentRunStatusIcon.SEARCH, "读取已授权位置")
+    AgentToolName.GET_CURRENT_TIME -> AgentRunStatus(AgentRunStatusIcon.OVERVIEW, "读取当前时间")
+    AgentToolName.WEATHER_QUICK -> AgentRunStatus(AgentRunStatusIcon.SEARCH, "查询天气")
+    AgentToolName.GET_DATE_AGENDA -> AgentRunStatus(AgentRunStatusIcon.SCHEDULE, "按日期查询课程与待办")
     AgentToolName.GET_CURRENT_OVERVIEW ->
         AgentRunStatus(AgentRunStatusIcon.OVERVIEW, "读取当前日程")
     AgentToolName.SEARCH_COURSES ->
@@ -87,7 +98,7 @@ internal fun AgentToolName.runStatus(): AgentRunStatus = when (this) {
 
 /** Immutable snapshot reads only need to be exposed once per user turn. */
 internal val AgentToolName.isOneShotPerTurn: Boolean
-    get() = this != AgentToolName.SEARCH_COURSES
+    get() = this !in setOf(AgentToolName.SEARCH_COURSES, AgentToolName.GET_DATE_AGENDA, AgentToolName.WEATHER_QUICK)
 
 internal fun AgentToolCall.cacheKey(): String = buildString {
     append(name.name)
@@ -108,6 +119,30 @@ internal fun agentToolDefinitions(
     strictFunctions: Boolean = false,
     excludedTools: Set<AgentToolName> = emptySet()
 ): JsonArray = buildJsonArray {
+    listOf(AgentToolName.GET_MY_COURSES to "查询指定日期课程，date为yyyy-MM-dd，省略表示本地今天。活动安排需同时查询get_my_schedule；无活动时段时询问起止时间。",
+        AgentToolName.GET_MY_SCHEDULE to "查询指定日期的日程与未完成待办，含时间段和全天状态，排除最近删除。date为yyyy-MM-dd，省略表示本地今天。",
+        AgentToolName.GET_CURRENT_LOCATION to "读取用户已授权的当前位置；缺少权限时返回明确错误，不猜测城市。",
+        AgentToolName.GET_CURRENT_TIME to "读取设备当前日期、时间及时区，解析明天等相对时间前使用。"
+    ).forEach { (name, description) ->
+        if (name !in excludedTools) add(agentToolDefinition(name, description,
+            fields = if (name in setOf(AgentToolName.GET_MY_COURSES, AgentToolName.GET_MY_SCHEDULE)) mapOf("date" to "本地ISO日期，可为空表示今天", "offset" to "翻页偏移，默认0；结果有nextOffset时续读",
+                "activityStart" to "可选：活动开始HH:mm，与activityEnd一起提供", "activityEnd" to "可选：同日活动结束HH:mm，必须晚于开始") else emptyMap(),
+            strict = strictFunctions))
+    }
+    if (AgentToolName.WEATHER_QUICK !in excludedTools) add(agentToolDefinition(
+        AgentToolName.WEATHER_QUICK,
+        "weather.quick：快速查询真实天气。city 为明确城市，可为空表示设备当前位置；date 为 yyyy-MM-dd，可为空表示本地今天。结果 ok/text/temperature 来自 Open-Meteo。成功后直接回复真实结果，不再重复查询或只说正在查询；失败时说明原因，不猜测天气。",
+        fields = linkedMapOf("city" to "明确城市或空值使用已授权定位", "date" to "ISO 日期或空值使用本地今天"),
+        strict = strictFunctions
+    ))
+    if (AgentToolName.GET_DATE_AGENDA !in excludedTools) add(agentToolDefinition(
+        AgentToolName.GET_DATE_AGENDA,
+        "按设备本地日期查询课程与待办。startDate/endDate 为 yyyy-MM-dd 且包含首尾，最多366天。kind=ALL/COURSES/TODOS，默认ALL；includeCompleted 默认false；includeUndated 默认false，问近期/所有待办时可为true。返回完整计数、按时间排序的明细及 nextOffset；有 nextOffset 必须续读才能声称已列出全部。课程使用真实学期、单双周与调休规则。",
+        fields = linkedMapOf("startDate" to "起始本地日期，必填", "endDate" to "结束本地日期，必填",
+            "kind" to "ALL、COURSES 或 TODOS", "includeCompleted" to "true/false：是否包含已完成待办",
+            "includeUndated" to "true/false：是否包含没有日期的待办", "offset" to "翻页偏移，默认0"),
+        strict = strictFunctions
+    ))
     if (AgentToolName.GET_CURRENT_OVERVIEW !in excludedTools) add(agentToolDefinition(
         AgentToolName.GET_CURRENT_OVERVIEW,
         "当前日期、时间、学期状态、有效教学周、今天/明天的完整课程记录与实际发生时间、原教学周和天气。",
@@ -298,27 +333,32 @@ private fun agentToolDefinition(
     name: AgentToolName,
     description: String,
     courseSearch: Boolean = false,
+    fields: Map<String, String> = emptyMap(),
     strict: Boolean = false
 ) = buildJsonObject {
     put("type", "function")
     put("function", buildJsonObject {
-        put("name", name.name)
+        // Dots are not legal function names for several compatible providers.
+        // weather.quick is the service API; WEATHER_QUICK is its portable model wire name.
+        put("name", if (name in ContextToolNames) name.name.lowercase() else name.name)
         put("description", description)
         put("parameters", buildJsonObject {
             put("type", "object")
             put("properties", buildJsonObject {
-                if (courseSearch) {
-                    AgentCourseSearchFields.forEach { (key, description) ->
+                (if (courseSearch) AgentCourseSearchFields else fields).forEach { (key, description) ->
                         put(key, buildJsonObject {
                             put("type", buildJsonArray { add(JsonPrimitive("string")); add(JsonPrimitive("null")) })
                             put("description", description)
                         })
                     }
-                }
             })
             put("required", buildJsonArray {
                 // Strict providers require all declared fields; unused filters are JSON null.
                 if (courseSearch && strict) AgentCourseSearchFields.keys.forEach { add(JsonPrimitive(it)) }
+                if (strict) fields.keys.forEach { add(JsonPrimitive(it)) }
+                else if (name == AgentToolName.GET_DATE_AGENDA) {
+                    add(JsonPrimitive("startDate")); add(JsonPrimitive("endDate"))
+                }
             })
             put("additionalProperties", false)
         })
@@ -361,6 +401,12 @@ internal fun executeAgentReadTools(
     return calls.map { call ->
         val content = try {
             when (call.name) {
+                AgentToolName.GET_MY_COURSES -> agentContextAgenda(call.arguments, scopedFacts, "COURSES")
+                AgentToolName.GET_MY_SCHEDULE -> agentContextAgenda(call.arguments, scopedFacts, "TODOS")
+                AgentToolName.GET_CURRENT_TIME -> agentCurrentTimeResult()
+                AgentToolName.GET_CURRENT_LOCATION -> throw IllegalArgumentException("位置工具需要会话权限上下文")
+                AgentToolName.WEATHER_QUICK -> throw IllegalArgumentException("天气必须通过会话层的 weather.quick 联网接口读取，当前离线执行器没有天气结果")
+                AgentToolName.GET_DATE_AGENDA -> agentDateAgendaResult(call.arguments, scopedFacts)
                 AgentToolName.GET_CURRENT_OVERVIEW -> agentOverviewResult(scopedFacts)
                 AgentToolName.SEARCH_COURSES -> agentCourseSearchResult(call.arguments, scopedFacts)
                 AgentToolName.GET_WEEK_SCHEDULE -> agentWeekResult(scopedFacts)
@@ -403,20 +449,19 @@ private val LeakedAgentFunctionProtocol = Regex(
 internal fun containsLeakedAgentFunctionProtocol(content: String): Boolean =
     LeakedAgentFunctionProtocol.containsMatchIn(content)
 
-internal class AgentProtocolViolationException :
-    IllegalStateException("模型输出了无效的内部工具协议")
+internal class AgentProtocolViolationException(val clarification: String? = null) :
+    IllegalStateException(clarification ?: "这次未能整理好内容，请补充信息或重试；尚未创建任何项目")
 
 /**
- * Streams normal answer text with a short look-behind window while keeping provider-internal
- * function syntax out of the UI. A protocol failure can therefore be retried without briefly
- * flashing DSML or persisting it as an assistant message.
+ * Holds transport chunks until the complete answer and proposal have passed validation.
+ * A repair never flashes internal syntax or persists unchecked assistant content.
  */
 internal class AgentFinalOutputGate(
     private val onDelta: (String) -> Unit,
-    private val holdBackCharacters: Int = 64
+    private val holdBackCharacters: Int = 64,
+    private val validate: (String) -> String = { it }
 ) {
     private val content = StringBuilder()
-    private var forwardedCharacters = 0
 
     fun accept(delta: String) {
         if (delta.isEmpty()) return
@@ -425,24 +470,22 @@ internal class AgentFinalOutputGate(
         if (containsLeakedAgentFunctionProtocol(content.substring(scanStart))) {
             throw AgentProtocolViolationException()
         }
-        forwardUntil((content.length - holdBackCharacters).coerceAtLeast(0))
+        // Proposals and echoed fact JSON cannot be validated from a partial chunk. Keep this
+        // transport buffer private until the complete reply is checked, for every provider.
     }
 
     fun finish(answer: String): String {
         if (answer.isBlank()) throw MissingAgentBodyException()
         if (containsLeakedAgentFunctionProtocol(answer)) throw AgentProtocolViolationException()
+        if (containsAgentContextEcho(answer)) throw AgentProtocolViolationException()
         if (content.toString() != answer) {
             throw IllegalStateException("AI 流式响应内容不完整，请重试")
         }
-        forwardUntil(content.length)
-        return answer
+        val checked = validate(answer)
+        onDelta(checked)
+        return checked
     }
 
-    private fun forwardUntil(endExclusive: Int) {
-        if (endExclusive <= forwardedCharacters) return
-        onDelta(content.substring(forwardedCharacters, endExclusive))
-        forwardedCharacters = endExclusive
-    }
 }
 
 /**
@@ -453,7 +496,7 @@ internal class AgentFinalOutputGate(
  * answer after it becomes visible immediately.
  */
 internal fun sanitizeAgentToolOutput(content: String): String {
-    if (containsLeakedAgentFunctionProtocol(content)) return ""
+    if (containsLeakedAgentFunctionProtocol(content) || containsAgentContextEcho(content)) return ""
     val completeMatches = CompleteAgentToolResult.findAll(content).toList()
     if (completeMatches.isNotEmpty()) {
         return content

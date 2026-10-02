@@ -58,7 +58,12 @@ object DayAgentPreferences {
             memoryTurnDay = storage.getString("memory_turn_day", null),
             memoryTurnCount = storage.getInt("memory_turn_count", 0),
             memoryLastAgentUpdateDay = storage.getString("memory_last_agent_update_day", null),
-            appliedActionsBySchedule = appliedActions
+            appliedActionsBySchedule = appliedActions,
+            personaJson = AgentPersonaStore.raw(context),
+            personaLibraryJson = AgentPersonaRepository.export(context),
+            conversationMetadataBySchedule = scheduleStableIdsByRoomId.entries.associate { (roomId, stableId) ->
+                stableId to AgentConversationStore.raw(context, roomId)
+            }
         )
     }
 
@@ -67,7 +72,7 @@ object DayAgentPreferences {
         backup: BackupDayAgentPreferences,
         scheduleRoomIdsByStableId: Map<String, Int>
     ) {
-        backup.appliedActionsBySchedule.keys.forEach { stableId ->
+        (backup.appliedActionsBySchedule.keys + backup.conversationMetadataBySchedule.keys).forEach { stableId ->
             BackupStableId.requireValid(stableId, BackupStableId.SCHEDULE_PREFIX)
             require(stableId in scheduleRoomIdsByStableId) {
                 "Day Agent applied action 引用了不存在的 schedule: $stableId"
@@ -96,6 +101,11 @@ object DayAgentPreferences {
             editor.putStringSet("applied_actions_$targetRoomId", actions.toSet())
         }
         check(editor.commit()) { "无法提交 Day Agent preferences" }
+        AgentPersonaStore.save(context, AgentPersonaStore.decode(backup.personaJson))
+        AgentPersonaRepository.restore(context, backup.personaLibraryJson)
+        scheduleRoomIdsByStableId.forEach { (stableId, roomId) ->
+            AgentConversationStore.restore(context, roomId, backup.conversationMetadataBySchedule[stableId] ?: "[]")
+        }
         mutableChanges.value += 1
     }
 

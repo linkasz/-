@@ -81,14 +81,14 @@ internal fun XiaomiSuperIslandSettingsSection(config: ScheduleConfigEntity, back
             SettingsInfoRow(
                 "配置步骤",
                 "1. 选择 Shizuku 或 root，完成下方授权。\n" +
-                    "2. 在系统设置中搜索“超级岛”，开启总开关及 SleepDown 的显示权限，并允许通知。\n" +
-                    "3. 允许 SleepDown 自启动和后台运行，避免课程提醒延迟。\n" +
+                    "2. 在系统设置中搜索“超级岛”，开启总开关及 时序清单 的显示权限，并允许通知。\n" +
+                    "3. 允许 时序清单 自启动和后台运行，避免课程提醒延迟。\n" +
                     "4. 回到通知设置底部点“测试超级岛”；课程约 21～22 分钟后开始，持续 5 分钟。"
             )
             SettingsDivider()
             SettingsInfoRow(
                 "Shizuku 授权方法",
-                "从 Shizuku 官网下载安装；在系统开发者选项打开无线调试，在 Shizuku 内按提示配对并启动服务，再返回这里授权 SleepDown。已 root 的设备也可以在 Shizuku 内通过 root 启动服务。"
+                "从 Shizuku 官网下载安装；在系统开发者选项打开无线调试，在 Shizuku 内按提示配对并启动服务，再返回这里授权 时序清单。已 root 的设备也可以在 Shizuku 内通过 root 启动服务。"
             )
             SettingsDivider()
             SettingsValueRow("系统超级岛", if (systemSupported) "已检测到" else "未检测到，请确认系统版本")
@@ -115,7 +115,7 @@ internal fun XiaomiSuperIslandSettingsSection(config: ScheduleConfigEntity, back
                 SettingsDivider()
                 SettingsActionRow(
                     title = "Shizuku 授权",
-                    subtitle = if (shizukuRunning) "授权 SleepDown 使用 Shizuku。" else "先下载、配对并启动 Shizuku。",
+                    subtitle = if (shizukuRunning) "授权 时序清单 使用 Shizuku。" else "先下载、配对并启动 Shizuku。",
                     buttonText = if (shizukuRunning) "授权" else "打开",
                     iconRes = R.drawable.ic_settings,
                     backdrop = backdrop,
@@ -145,7 +145,7 @@ internal fun XiaomiSuperIslandSettingsSection(config: ScheduleConfigEntity, back
             SettingsDivider()
             SettingsActionRow(
                 title = "root 授权",
-                subtitle = "有 root 的设备可直接授予 SleepDown 权限，与 Shizuku 二选一。",
+                subtitle = "有 root 的设备可直接授予 时序清单 权限，与 Shizuku 二选一。",
                 buttonText = if (rootAuthorized) "重新验证" else "验证",
                 iconRes = R.drawable.ic_settings,
                 backdrop = backdrop,

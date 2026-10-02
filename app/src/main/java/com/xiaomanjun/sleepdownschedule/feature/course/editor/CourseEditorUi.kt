@@ -11,9 +11,7 @@ import com.xiaomanjun.sleepdownschedule.core.ui.designsystem.*
 import com.xiaomanjun.sleepdownschedule.glass.ui.*
 import com.xiaomanjun.sleepdownschedule.feature.home.day.*
 import com.xiaomanjun.sleepdownschedule.feature.schedule.picker.*
-import com.xiaomanjun.sleepdownschedule.feature.todo.TodoActivity
 import com.xiaomanjun.sleepdownschedule.feature.todo.TodoItemEntity
-import com.xiaomanjun.sleepdownschedule.feature.todo.TodoQuickCaptureContract
 import com.xiaomanjun.sleepdownschedule.feature.todo.priorityLabel
 
 import com.xiaomanjun.sleepdownschedule.*
@@ -30,7 +28,6 @@ import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.ContentValues
 import android.content.Context
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -358,7 +355,8 @@ fun NormalizedCourseEditorScreen(
     backdrop: Backdrop?,
     pickerRenderInRootScaffold: Boolean = true,
     copyDraft: CourseEntity? = null,
-    contextMessage: String? = null
+    contextMessage: String? = null,
+    onManageCourseTodos: (Long, Boolean) -> Unit = { _, _ -> }
 ) {
     val formData = remember(state.config, state.periods, state.courses) {
         CourseEditorFormData(
@@ -377,7 +375,8 @@ fun NormalizedCourseEditorScreen(
         backdrop = backdrop,
         pickerRenderInRootScaffold = pickerRenderInRootScaffold,
         copyDraft = copyDraft,
-        contextMessage = contextMessage
+        contextMessage = contextMessage,
+        onManageCourseTodos = onManageCourseTodos
     )
 }
 
@@ -776,7 +775,8 @@ fun NormalizedCourseEditorScreen(
     onPagerPresentationChange: ((CourseEditorPagerPresentation) -> Unit)? = null,
     rowEntrance: (Int) -> Float = { _ -> 1f },
     copyDraft: CourseEntity? = null,
-    contextMessage: String? = null
+    contextMessage: String? = null,
+    onManageCourseTodos: (Long, Boolean) -> Unit = { _, _ -> }
 ) {
     val config = formData.config
     val editorGroups = remember(initialCourse, formData.courses) {
@@ -885,7 +885,8 @@ fun NormalizedCourseEditorScreen(
                     colorPickerVisible = true
                 },
                 pageCount = editorGroups.size,
-                rowEntrance = rowEntrance
+                rowEntrance = rowEntrance,
+                onManageCourseTodos = onManageCourseTodos
             )
         }
         if (renderPagerIndicator && pagerIndicatorVisible) {
@@ -955,7 +956,8 @@ private fun CourseEditorFormPage(
     onOpenPicker: (CourseEditorPickerRequest) -> Unit,
     onOpenColorPicker: () -> Unit,
     pageCount: Int,
-    rowEntrance: (Int) -> Float = { _ -> 1f }
+    rowEntrance: (Int) -> Float = { _ -> 1f },
+    onManageCourseTodos: (Long, Boolean) -> Unit
 ) {
     val context = LocalContext.current
     val courseIds = remember(groupedCourses) { groupedCourses.mapTo(HashSet()) { it.id } }
@@ -1248,13 +1250,7 @@ private fun CourseEditorFormPage(
                             }
                         }
                     }
-                    TextButton(onClick = {
-                        context.startActivity(
-                            Intent(context, TodoActivity::class.java)
-                                .putExtra(TodoQuickCaptureContract.EXTRA_INITIAL_COURSE_ID, course.id)
-                                .putExtra(TodoQuickCaptureContract.EXTRA_START_NEW_TASK, relatedTodos.isEmpty())
-                        )
-                    }) {
+                    TextButton(onClick = { onManageCourseTodos(course.id, relatedTodos.isEmpty()) }) {
                         Text(if (relatedTodos.isEmpty()) "为这门课添加待办" else "管理这门课的待办")
                     }
                 }

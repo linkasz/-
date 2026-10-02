@@ -46,6 +46,9 @@ internal class HomeAssistantState(private val scope: CoroutineScope) {
     var closing by mutableStateOf(false)
     var conversationStartsFullScreen by mutableStateOf(false)
         private set
+    // A full-size course overlay still uses its original morph; only explicit navigation opens a page.
+    var conversationUsesIndependentPage by mutableStateOf(false)
+        private set
     internal val controlBounds = mutableMapOf<Any, LayoutCoordinates>()
     fun canPullAt(position: Offset): Boolean = controlBounds.values.none {
         it.isAttached && it.boundsInRoot().contains(position)
@@ -92,8 +95,9 @@ internal class HomeAssistantState(private val scope: CoroutineScope) {
         reminderGeneration++
     }
 
-    fun openConversation() {
-        conversationStartsFullScreen = stage == HomeAssistantStage.Reminder
+    fun openConversation(fullScreen: Boolean = stage == HomeAssistantStage.Reminder, independentPage: Boolean = false) {
+        conversationStartsFullScreen = fullScreen
+        conversationUsesIndependentPage = independentPage
         sourceBounds = reminderBounds.takeIf { stage == HomeAssistantStage.Reminder }
         closing = false
         stage = HomeAssistantStage.Conversation
@@ -112,6 +116,7 @@ internal class HomeAssistantState(private val scope: CoroutineScope) {
         pullPixels = 0f
         pullingHome = false
         conversationStartsFullScreen = false
+        conversationUsesIndependentPage = false
     }
 }
 

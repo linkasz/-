@@ -1,5 +1,7 @@
 package com.xiaomanjun.sleepdownschedule.feature.todo
 
+import android.net.Uri
+
 import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
@@ -48,7 +50,8 @@ data class TodoGroupEntity(
         Index("groupId"),
         Index("parentId"),
         Index("dueAt"),
-        Index("courseId")
+        Index("courseId"),
+        Index(value = ["calendarSyncToken"], unique = true)
     ]
 )
 data class TodoItemEntity(
@@ -67,8 +70,29 @@ data class TodoItemEntity(
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
     val completedAt: Long? = null,
-    val calendarEventId: Long? = null
+    val calendarEventId: Long? = null,
+    val calendarSyncToken: String? = null,
+    @ColumnInfo(defaultValue = "'PENDING'") val calendarSyncState: String = TodoCalendarSyncState.PENDING,
+    val endAt: Long? = null,
+    @ColumnInfo(defaultValue = "'LEGACY'") val reminderMode: String = "LEGACY",
+    @ColumnInfo(defaultValue = "0") val reminderOffsetMinutes: Int = 0,
+    @ColumnInfo(defaultValue = "480") val reminderTimeMinutes: Int = 480,
+    @ColumnInfo(defaultValue = "0") val persistentReminder: Boolean = false,
+    @ColumnInfo(defaultValue = "0") val strongReminder: Boolean = false,
+    val deletedAt: Long? = null,
+    val deletionBatch: String? = null
 )
+
+object TodoCalendarSyncState {
+    const val PENDING = "PENDING"
+    const val CREATING = "CREATING"
+    const val LINKED = "LINKED"
+    const val NEEDS_CONFIRMATION = "NEEDS_CONFIRMATION"
+    const val SKIPPED = "SKIPPED"
+    const val LOCAL_ONLY = "LOCAL_ONLY"
+
+    val all = setOf(PENDING, CREATING, LINKED, NEEDS_CONFIRMATION, SKIPPED, LOCAL_ONLY)
+}
 
 data class TodoWithSubtasks(
     @androidx.room.Embedded val task: TodoItemEntity,
@@ -87,10 +111,41 @@ data class TodoDraft(
     val groupId: Long? = null,
     val parentId: Long? = null,
     val courseId: Long? = null,
-    val repeatRule: String = "NONE"
+    val repeatRule: String = "NONE",
+    val endAt: Long? = null,
+    val reminderMode: String = "NONE",
+    val reminderOffsetMinutes: Int = 0,
+    val reminderTimeMinutes: Int = 480,
+    val persistentReminder: Boolean = false,
+    val strongReminder: Boolean = false
 )
 
+enum class TodoFilterKind { ALL, UNGROUPED, GROUP, DELETED }
+
+data class TodoFilter(val kind: TodoFilterKind = TodoFilterKind.ALL, val groupId: Long? = null) {
+    fun matches(item: TodoItemEntity): Boolean = when (kind) {
+        TodoFilterKind.ALL -> item.deletedAt == null
+        TodoFilterKind.UNGROUPED -> item.deletedAt == null && item.groupId == null
+        TodoFilterKind.GROUP -> item.deletedAt == null && item.groupId == groupId
+        TodoFilterKind.DELETED -> item.deletedAt != null
+    }
+}
+
 enum class TodoPage { Tasks, Calendar, Insights }
+
+/** One-shot data delivered by shares, notifications, widgets or in-app course actions. */
+data class TodoEntryRequest(
+    val id: Long,
+    val destination: TodoPage = TodoPage.Tasks,
+    val todoId: Long? = null,
+    val courseId: Long? = null,
+    val startWithNewTask: Boolean = false,
+    val sharedText: String = "",
+    val imageUris: List<Uri> = emptyList(),
+    val screenshotPath: String? = null,
+    val requestShizukuPermission: Boolean = false,
+    val returnToCourse: Boolean = false
+)
 
 fun repeatLabel(value: String): String = when (value) {
     "DAILY" -> "每天"

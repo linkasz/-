@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Colored overscan avoids a white rim when launchers animate their adaptive masks. -->
+    <color name="icon_palette_sky_background">#4FA8F7</color>
+    <color name="icon_palette_green_background">#32C879</color>
+    <color name="icon_palette_teal_background">#15C1BE</color>
+    <color name="icon_palette_purple_background">#8C63EE</color>
+    <color name="icon_palette_orange_background">#FF7956</color>
+</resources>

@@ -285,7 +285,9 @@ internal fun CourseEditorContainerOverlayHost(
     config: ScheduleConfigEntity,
     adaptiveMetrics: HomeAdaptiveMetrics,
     modifier: Modifier = Modifier,
+    suspended: Boolean = false,
     awaitOpeningGate: suspend () -> Unit = {},
+    onManageCourseTodos: (Long, Boolean) -> Unit = { _, _ -> },
     onDismissRequest: () -> Unit,
     onSave: (originals: List<CourseEntity>, edited: List<CourseEntity>, targetWeek: Int?) -> Unit,
     onCopy: (List<CourseEntity>, (Boolean) -> Unit) -> Unit,
@@ -426,7 +428,7 @@ internal fun CourseEditorContainerOverlayHost(
     val deleteEditedCourse = remember(shownRequest.targetWeek, onDelete) {
         { courses: List<CourseEntity> -> onDelete(courses, shownRequest.targetWeek) }
     }
-    BackHandler(enabled = isOverlayActive) {
+    BackHandler(enabled = isOverlayActive && !suspended) {
         dismissEditor()
     }
 
@@ -648,6 +650,7 @@ internal fun CourseEditorContainerOverlayHost(
     Box(
         modifier = modifier
             .fillMaxSize()
+            .graphicsLayer { translationX = if (suspended) size.width * 2f else 0f }
             .onSizeChanged { rootSize = it }
     ) {
         Box(
@@ -688,7 +691,8 @@ internal fun CourseEditorContainerOverlayHost(
                         backdrop = editorFormBackdrop,
                         onDismissRequest = dismissEditor,
                         onSave = saveEditedCourse,
-                        onDelete = deleteEditedCourse
+                        onDelete = deleteEditedCourse,
+                        onManageCourseTodos = onManageCourseTodos
                     )
                 }
                 if (showSourceCover) {
@@ -725,7 +729,8 @@ private fun CourseEditorFormLayer(
     backdrop: Backdrop?,
     onDismissRequest: () -> Unit,
     onSave: (List<CourseEntity>, List<CourseEntity>) -> Unit,
-    onDelete: (List<CourseEntity>) -> Unit
+    onDelete: (List<CourseEntity>) -> Unit,
+    onManageCourseTodos: (Long, Boolean) -> Unit
 ) {
     if (targetRect.width <= 1f || targetRect.height <= 1f) {
         return
@@ -787,6 +792,7 @@ private fun CourseEditorFormLayer(
                             onSaveCourses = { onSave(emptyList(), it) },
                             onSaveGroup = onSave,
                             onDelete = {},
+                            onManageCourseTodos = onManageCourseTodos,
                             onDeleteGroup = onDelete,
                             backdrop = backdrop,
                             renderPagerIndicator = false,
