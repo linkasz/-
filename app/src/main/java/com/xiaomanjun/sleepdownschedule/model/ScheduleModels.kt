@@ -105,7 +105,7 @@ data class ScheduleConfigEntity(
     val homeTextLight: Boolean = false,
     @ColumnInfo(defaultValue = "1") val homeChromeBlurScale: Float = DefaultHomeChromeBlurScale,
     @ColumnInfo(defaultValue = "1") val homeChromeSamplingScale: Float = DefaultHomeChromeSamplingScale,
-    val followSystemDarkMode: Boolean = true,
+    val followSystemDarkMode: Boolean = false,
     val darkMode: Boolean = false,
     val defaultWallpaperStyle: DefaultWallpaperStyle = DefaultWallpaperStyle.NONE,
     val hideEmptyWeekends: Boolean = false,
@@ -212,7 +212,7 @@ data class ImportDraft(
     val source: ImportDraftSource = ImportDraftSource.STANDARD
 )
 
-fun defaultConfig(id: Int = 1) = ScheduleConfigEntity(id = id, totalWeeks = 20, currentWeek = 1, notificationLeadMinutes = 10, termStartDate = null, autoCurrentWeek = false, notificationsEnabled = true, notificationMode = NotificationMode.STANDARD, wallpaperUri = null, wallpaperBlur = 0f, wallpaperBrightness = 1f, wallpaperPortraitCenterX = 0.5f, wallpaperPortraitCenterY = 0.5f, wallpaperPortraitScale = 1f, wallpaperLandscapeCenterX = 0.5f, wallpaperLandscapeCenterY = 0.5f, wallpaperLandscapeScale = 1f, wallpaperSourceWidth = null, wallpaperSourceHeight = null, cardColorArgb = 0xFFD6E9FF, cardAlpha = 1f, courseCardBlur = 18f, courseCardGlassEnabled = true, courseCardFontScale = 1f, courseCardColorMode = CourseCardColorMode.SOLID, courseCardPalette = "", weekCardHeightDp = null, weekCardHeightScale = 1f, weekCardCornerProgress = 0.5f, homeTextLight = false, homeChromeBlurScale = DefaultHomeChromeBlurScale, homeChromeSamplingScale = DefaultHomeChromeSamplingScale, followSystemDarkMode = true, darkMode = false, defaultWallpaperStyle = DefaultWallpaperStyle.NONE, hideEmptyWeekends = false, dockAlignment = DockAlignment.CENTER, defaultHomeMode = HomeStartMode.WEEK, liveUpdateActionsEnabled = true, liveUpdateChipTextMode = LiveUpdateChipTextMode.LOCATION, classDurationMinutes = 45, breakDurationMinutes = 10, hideFromRecents = false, autoCheckUpdates = false)
+fun defaultConfig(id: Int = 1) = ScheduleConfigEntity(id = id, totalWeeks = 20, currentWeek = 1, notificationLeadMinutes = 10, termStartDate = null, autoCurrentWeek = false, notificationsEnabled = true, notificationMode = NotificationMode.STANDARD, wallpaperUri = null, wallpaperBlur = 0f, wallpaperBrightness = 1f, wallpaperPortraitCenterX = 0.5f, wallpaperPortraitCenterY = 0.5f, wallpaperPortraitScale = 1f, wallpaperLandscapeCenterX = 0.5f, wallpaperLandscapeCenterY = 0.5f, wallpaperLandscapeScale = 1f, wallpaperSourceWidth = null, wallpaperSourceHeight = null, cardColorArgb = 0xFFD6E9FF, cardAlpha = 1f, courseCardBlur = 18f, courseCardGlassEnabled = true, courseCardFontScale = 1f, courseCardColorMode = CourseCardColorMode.SOLID, courseCardPalette = "", weekCardHeightDp = null, weekCardHeightScale = 1f, weekCardCornerProgress = 0.5f, homeTextLight = false, homeChromeBlurScale = DefaultHomeChromeBlurScale, homeChromeSamplingScale = DefaultHomeChromeSamplingScale, followSystemDarkMode = false, darkMode = false, defaultWallpaperStyle = DefaultWallpaperStyle.NONE, hideEmptyWeekends = false, dockAlignment = DockAlignment.CENTER, defaultHomeMode = HomeStartMode.WEEK, liveUpdateActionsEnabled = true, liveUpdateChipTextMode = LiveUpdateChipTextMode.LOCATION, classDurationMinutes = 45, breakDurationMinutes = 10, hideFromRecents = false, autoCheckUpdates = false)
 
 fun defaultPeriods(scheduleId: Int = 1) = listOf(
     PeriodEntity(1, "08:00", "08:45", scheduleId), PeriodEntity(2, "08:55", "09:40", scheduleId),

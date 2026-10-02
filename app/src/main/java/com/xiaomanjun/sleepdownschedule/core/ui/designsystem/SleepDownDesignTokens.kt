@@ -15,6 +15,13 @@ import androidx.compose.ui.unit.dp
  * not be used as an excuse to retune it; visual changes require their own reviewed batch.
  */
 object SleepDownDesignTokens {
+    object Button {
+        val Primary = Color(0xFF0A84FF)
+        val MinimumTouchSize = 48.dp
+        val IconSize = 22.dp
+        val BorderWidth = 1.dp
+        val ActionHeight = 50.dp
+    }
     /**
      * Shared page chrome and content rhythm for secondary screens.
      *

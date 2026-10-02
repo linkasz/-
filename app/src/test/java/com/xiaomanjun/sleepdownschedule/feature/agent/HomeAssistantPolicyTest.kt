@@ -8,6 +8,45 @@ import java.time.LocalDate
 import java.time.LocalTime
 
 class HomeAssistantPolicyTest {
+    @Test fun collapsedComposerReturnsToTheInitialCenteredRow() {
+        // 56dp row + 16dp capsule inset + 20dp footer, with a 28dp dock gap.
+        assertEquals(28f, assistantComposerTop(20f + 92f, 56f, 28f), 0f)
+        assertEquals(assistantComposerTop(20f + 92f, 56f, 28f), 20f + 8f, 0f)
+    }
+    @Test fun outsideTapNeverClosesAnInsideOrConsumedDrag() {
+        assertTrue(assistantOutsideTapAllowed(true, false, false))
+        assertFalse(assistantOutsideTapAllowed(false, false, false))
+        assertFalse(assistantOutsideTapAllowed(true, true, false))
+        assertFalse(assistantOutsideTapAllowed(true, false, true))
+        assertFalse(assistantOutsideTapAllowed(false, true, true))
+    }
+
+    @Test fun resizedDismissShrinksHeightAndWidthTogetherFromTheCurrentFrame() {
+        val anchor = androidx.compose.ui.geometry.Rect(250f, 0f, 330f, 24f)
+        val current = androidx.compose.ui.geometry.Rect(12f, 20f, 568f, 460f)
+        assertEquals(current, assistantClosingFrame(anchor, current, .8f, .9f, .8f, .9f))
+        val halfway = assistantClosingFrame(anchor, current, .4f, .45f, .8f, .9f)
+        assertEquals((anchor.height + current.height) / 2, halfway.height, .001f)
+        assertEquals((anchor.width + current.width) / 2, halfway.width, .001f)
+        assertEquals(anchor, assistantClosingFrame(anchor, current, 0f, 0f, .8f, .9f))
+    }
+
+    @Test fun continuousHeightRetainsInteriorAndResistsBothEdges() {
+        assertEquals(345f, resistedAssistantHeight(345f, 220f, 800f), 0f)
+        assertEquals(805f, resistedAssistantHeight(833.3333f, 220f, 800f), .01f)
+        assertEquals(205f, resistedAssistantHeight(120f, 220f, 800f), 0f)
+        assertEquals(824f, resistedAssistantHeight(2000f, 220f, 800f), 0f)
+        assertEquals(196f, resistedAssistantHeight(-1000f, 220f, 800f), 0f)
+        assertEquals(80f, constrainedAssistantHeight(120f, 220f, 80f), 0f)
+    }
+    @Test fun handleSwipeOnlyCommitsTheRequestedDirectionAndDistance() {
+        assertTrue(assistantHandleSwipeCommits(24f, false, 24f))
+        assertTrue(assistantHandleSwipeCommits(-24f, true, 24f))
+        assertFalse(assistantHandleSwipeCommits(-40f, false, 24f))
+        assertFalse(assistantHandleSwipeCommits(40f, true, 24f))
+        assertFalse(assistantHandleSwipeCommits(23f, false, 24f))
+        assertFalse(assistantHandleSwipeCommits(-23f, true, 24f))
+    }
     private val day = LocalDate.of(2026, 9, 16)
 
     private fun slot(id: Long = 1, hour: Int = 8, minute: Int = 0, date: LocalDate = day) = AgentCourseSlot(

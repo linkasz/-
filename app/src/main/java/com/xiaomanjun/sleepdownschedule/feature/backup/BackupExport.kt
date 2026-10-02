@@ -228,9 +228,23 @@ object BackupExportMapper {
                 parentId = item.parentId?.let(todoIds::getValue),
                 courseId = item.courseId?.let(courseIds::getValue),
                 repeatRule = item.repeatRule,
+                endAt = item.endAt,
+                reminderMode = item.reminderMode,
+                reminderOffsetMinutes = item.reminderOffsetMinutes,
+                reminderTimeMinutes = item.reminderTimeMinutes,
+                persistentReminder = item.persistentReminder,
+                strongReminder = item.strongReminder,
+                deletedAt = item.deletedAt,
+                deletionBatch = item.deletionBatch,
                 createdAt = item.createdAt,
                 updatedAt = item.updatedAt,
-                completedAt = item.completedAt
+                completedAt = item.completedAt,
+                calendarSyncToken = item.calendarSyncToken,
+                calendarSyncState = if (item.calendarSyncState == TodoCalendarSyncState.CREATING) {
+                    TodoCalendarSyncState.NEEDS_CONFIRMATION
+                } else {
+                    item.calendarSyncState
+                }
             )
         }
         require(widgetIds.size == snapshot.widgetAppearances.size) { "widget appearance 存在重复复合主键" }

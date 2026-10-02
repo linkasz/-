@@ -203,7 +203,11 @@ fun Modifier.sleepDownGlassSurface(
             effectKey = { currentEffectInputKey.value },
             cacheDecorations = cacheDecorations,
             clipGenericOutlineInDraw = clipGenericOutlineInDraw,
-            placementLayer = placementLayer,
+            // Ordinary surfaces already clip material AND foreground to the live outline in draw.
+            // A second retained placement clip can replay a stale/empty outline when tabs reuse
+            // their children (visible highlight, missing icon/tint). Keep it only for fixed morph
+            // envelopes or callers which explicitly omit the draw-time outline.
+            placementLayer = placementLayer && (allocationPaddingPx != null || !clipGenericOutlineInDraw),
             sampleScale = backdropSampleScale,
             coordinatesFrozen = { currentCoordinatesFrozen.value.invoke() },
             sampleRecordKey = { currentSampleRecordKey.value.invoke() }

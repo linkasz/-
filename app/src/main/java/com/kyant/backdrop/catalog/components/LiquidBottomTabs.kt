@@ -4,8 +4,8 @@ package com.kyant.backdrop.catalog.components
 
 import com.xiaomanjun.sleepdownschedule.glass.ui.*
 
-import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.EaseOut
+import androidx.compose.animation.core.animate
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -26,10 +26,11 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -44,10 +45,8 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastCoerceIn
-import androidx.compose.ui.util.fastRoundToInt
 import androidx.compose.ui.util.lerp
 import com.kyant.backdrop.Backdrop
-import com.kyant.backdrop.catalog.utils.DampedDragAnimation
 import com.kyant.backdrop.catalog.utils.InteractiveHighlight
 import com.kyant.backdrop.effects.blur
 import com.kyant.backdrop.effects.lens
@@ -65,8 +64,7 @@ import com.xiaomanjun.sleepdownschedule.glass.rememberGlassCombinedBackdrop
 import com.xiaomanjun.sleepdownschedule.glass.rememberGlassLayerBackdrop
 import com.xiaomanjun.sleepdownschedule.glass.rememberGlassSurfaceDescriptor
 import com.xiaomanjun.sleepdownschedule.glass.sleepDownGlassSurface
-import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.sign
@@ -101,6 +99,7 @@ fun LiquidBottomTabs(
     isLightThemeOverride: Boolean? = null,
     lightContainerColor: Color = Color(0xFFFAFAFA),
     lightAccentColor: Color = Color(0xFF0088FF),
+    darkAccentColor: Color = Color(0xFF0091FF),
     useOfficialGlassParameters: Boolean = false,
     content: @Composable RowScope.() -> Unit
 ) {
@@ -119,7 +118,7 @@ fun LiquidBottomTabs(
         label = "LiquidBottomTabsContainerAlpha"
     )
     val accentColor by animateColorAsState(
-        targetValue = if (isLightTheme) lightAccentColor else Color(0xFF0091FF),
+        targetValue = if (isLightTheme) lightAccentColor else darkAccentColor,
         animationSpec = tween(220),
         label = "LiquidBottomTabsAccentColor"
     )
@@ -222,10 +221,15 @@ fun LiquidBottomTabs(
         val tabWidth = with(density) {
             (constraints.maxWidth.toFloat() - horizontalPadding.toPx() * 2f) / tabsCount
         }
-        val offsetAnimation = remember { Animatable(0f) }
-        val panelOffset by remember(density) {
+        val dragOffsetPx = remember { mutableFloatStateOf(0f) }
+        val offsetSettleJob = remember { arrayOfNulls<Job>(1) }
+        val panelOffset by remember(density, constraints.maxWidth) {
             derivedStateOf {
-                val fraction = (offsetAnimation.value / constraints.maxWidth).fastCoerceIn(-1f, 1f)
+                val fraction = if (constraints.maxWidth > 0) {
+                    (dragOffsetPx.floatValue / constraints.maxWidth).fastCoerceIn(-1f, 1f)
+                } else {
+                    0f
+                }
                 with(density) {
                     4f.dp.toPx() * fraction.sign * EaseOut.transform(abs(fraction))
                 }
@@ -233,68 +237,79 @@ fun LiquidBottomTabs(
         }
 
         val isLtr = LocalLayoutDirection.current == LayoutDirection.Ltr
+        val latestTabWidth = rememberUpdatedState(tabWidth)
+        val latestIsLtr = rememberUpdatedState(isLtr)
+        val latestOnTabSelected = rememberUpdatedState(onTabSelected)
         val animationScope = rememberCoroutineScope()
         var currentIndex by remember {
             mutableIntStateOf(selectedTabIndex().fastCoerceIn(0, tabsCount - 1))
         }
-        val dampedDragAnimation = remember(animationScope) {
-            DampedDragAnimation(
+        val dragAnimationRef = remember(animationScope) { arrayOfNulls<DockDragAnimation>(1) }
+        val interactiveHighlight = remember(animationScope) {
+            InteractiveHighlight(
+                animationScope = animationScope,
+                position = { size, _ ->
+                    val selectedValue = dragAnimationRef[0]?.value ?: selectedTabIndex().toFloat()
+                    val currentTabWidth = latestTabWidth.value
+                    Offset(
+                        if (latestIsLtr.value) (selectedValue + 0.5f) * currentTabWidth + panelOffset
+                        else size.width - (selectedValue + 0.5f) * currentTabWidth + panelOffset,
+                        size.height / 2f
+                    )
+                }
+            )
+        }
+        val dockDragAnimation = remember(animationScope) {
+            DockDragAnimation(
                 animationScope = animationScope,
                 initialValue = selectedTabIndex().toFloat(),
                 valueRange = 0f..(tabsCount - 1).toFloat(),
                 visibilityThreshold = 0.001f,
                 initialScale = 1f,
                 pressedScale = 78f / 56f,
-                onDragStarted = {},
+                onDragStarted = {
+                    offsetSettleJob[0]?.cancel()
+                    interactiveHighlight.updateExternal(Offset.Zero, pressed = true)
+                },
                 onDragStopped = {
-                    val targetIndex = targetValue.fastRoundToInt().fastCoerceIn(0, tabsCount - 1)
+                    val targetIndex = dockSettledIndex(targetValue, tabsCount)
+                    val selectionChanged = currentIndex != targetIndex
                     currentIndex = targetIndex
-                    animateToValue(targetIndex.toFloat())
-                    animationScope.launch {
-                        offsetAnimation.animateTo(
-                            0f,
-                            spring(1f, 300f, 0.5f)
-                        )
+                    animateToValue(targetIndex.toFloat(), releaseAfterAnimation = false)
+                    if (selectionChanged) latestOnTabSelected.value(targetIndex)
+                    interactiveHighlight.updateExternal(Offset.Zero, pressed = false)
+                    val releaseOffset = dragOffsetPx.floatValue
+                    offsetSettleJob[0] = animationScope.launch {
+                        animate(
+                            initialValue = releaseOffset,
+                            targetValue = 0f,
+                            animationSpec = spring(1f, 300f, 0.5f)
+                        ) { value, _ ->
+                            dragOffsetPx.floatValue = value
+                        }
                     }
                 },
                 onDrag = { _, dragAmount ->
                     updateValue(
-                        (targetValue + dragAmount.x / tabWidth * if (isLtr) 1f else -1f)
-                            .fastCoerceIn(0f, (tabsCount - 1).toFloat())
+                        dockDragTarget(
+                            currentTarget = targetValue,
+                            dragAmountPx = dragAmount.x,
+                            tabWidthPx = latestTabWidth.value,
+                            isLtr = latestIsLtr.value,
+                            tabsCount = tabsCount
+                        )
                     )
-                    animationScope.launch {
-                        offsetAnimation.snapTo(offsetAnimation.value + dragAmount.x)
-                    }
+                    dragOffsetPx.floatValue += dragAmount.x
                 }
             )
         }
+        dragAnimationRef[0] = dockDragAnimation
         LaunchedEffect(selectedTabIndex()) {
             val index = selectedTabIndex().fastCoerceIn(0, tabsCount - 1)
-            if (currentIndex != index || abs(dampedDragAnimation.targetValue - index.toFloat()) > 0.01f) {
+            if (currentIndex != index || abs(dockDragAnimation.targetValue - index.toFloat()) > 0.01f) {
                 currentIndex = index
-                dampedDragAnimation.animateToValue(index.toFloat())
+                dockDragAnimation.animateToValue(index.toFloat())
             }
-        }
-        LaunchedEffect(dampedDragAnimation) {
-            snapshotFlow { currentIndex }
-                .drop(1)
-                .collectLatest { index ->
-                    dampedDragAnimation.animateToValue(index.toFloat())
-                    onTabSelected(index)
-                }
-        }
-
-        val interactiveHighlight = remember(animationScope) {
-            InteractiveHighlight(
-                animationScope = animationScope,
-                position = { size, offset ->
-                    Offset(
-                        if (isLtr) (dampedDragAnimation.value + 0.5f) * tabWidth + panelOffset
-                        else size.width - (dampedDragAnimation.value + 0.5f) * tabWidth + panelOffset,
-                        size.height / 2f
-                    )
-                }
-            )
         }
 
         Row(
@@ -319,7 +334,7 @@ fun LiquidBottomTabs(
                     },
                     highlightOverride = { Highlight.Default },
                     additionalLayerBlock = {
-                        val progress = dampedDragAnimation.pressProgress
+                        val progress = dockDragAnimation.pressProgress
                         val scale = lerp(1f, 1f + 16f.dp.toPx() / size.width, progress)
                         scaleX = scale
                         scaleY = scale
@@ -341,7 +356,7 @@ fun LiquidBottomTabs(
         if (movingAccentContent) {
             CompositionLocalProvider(
                 LocalLiquidBottomTabScale provides {
-                    lerp(1f, pressedContentScale, dampedDragAnimation.pressProgress)
+                    lerp(1f, pressedContentScale, dockDragAnimation.pressProgress)
                 }
             ) {
                 Row(
@@ -359,7 +374,7 @@ fun LiquidBottomTabs(
                             shape = { Capsule() },
                             effectFrame = GlassEffectFrame(blur = null),
                             effectsOverride = {
-                                val progress = dampedDragAnimation.pressProgress
+                                val progress = dockDragAnimation.pressProgress
                                 vibrancy()
                                 blur(blurRadius.toPx())
                                 lens(
@@ -369,7 +384,7 @@ fun LiquidBottomTabs(
                                 )
                             },
                             highlightOverride = {
-                                val progress = dampedDragAnimation.pressProgress
+                                val progress = dockDragAnimation.pressProgress
                                 Highlight.Default.copy(alpha = progress * if (useOfficialGlassParameters) officialHighlightAlpha else 0.45f)
                             },
                             shadowOverride = if (containerShadowEnabled) ({ Shadow.Default }) else null,
@@ -393,14 +408,13 @@ fun LiquidBottomTabs(
             Modifier
                 .padding(horizontal = horizontalPadding)
                 .graphicsLayer {
-                    val progress = dampedDragAnimation.pressProgress
+                    val progress = dockDragAnimation.pressProgress
                     val widthOverflowPx = indicatorWidthOverflow.toPx() * progress
                     translationX =
-                        if (isLtr) dampedDragAnimation.value * tabWidth + panelOffset - widthOverflowPx / 2f
-                        else size.width - (dampedDragAnimation.value + 1f) * tabWidth + panelOffset + widthOverflowPx / 2f
+                        if (isLtr) dockDragAnimation.value * tabWidth + panelOffset - widthOverflowPx / 2f
+                        else size.width - (dockDragAnimation.value + 1f) * tabWidth + panelOffset + widthOverflowPx / 2f
                 }
-                .then(interactiveHighlight.gestureModifier)
-                .then(dampedDragAnimation.modifier)
+                .then(dockDragAnimation.modifier)
                 .sleepDownGlassSurface(
                     backdrop = rememberGlassCombinedBackdrop(backdrop, tabsBackdrop),
                     descriptor = indicatorDescriptor,
@@ -408,7 +422,7 @@ fun LiquidBottomTabs(
                     shape = { Capsule() },
                     effectFrame = GlassEffectFrame(blur = null),
                     effectsOverride = {
-                        val progress = dampedDragAnimation.pressProgress
+                        val progress = dockDragAnimation.pressProgress
                         lens(
                             selectedLensHeight.toPx() * progress,
                             selectedLensAmount.toPx() * progress,
@@ -416,18 +430,18 @@ fun LiquidBottomTabs(
                         )
                     },
                     highlightOverride = {
-                        val progress = dampedDragAnimation.pressProgress
+                        val progress = dockDragAnimation.pressProgress
                         Highlight.Default.copy(alpha = progress * if (useOfficialGlassParameters) officialHighlightAlpha else 0.45f)
                     },
                     shadowOverride = if (indicatorShadowEnabled) {
                         {
-                            val progress = dampedDragAnimation.pressProgress
+                            val progress = dockDragAnimation.pressProgress
                             Shadow(alpha = progress * if (useOfficialGlassParameters) officialShadowAlpha else 1f)
                         }
                     } else null,
                     innerShadowOverride = if (indicatorInnerShadowEnabled) {
                         {
-                            val progress = dampedDragAnimation.pressProgress
+                            val progress = dockDragAnimation.pressProgress
                             InnerShadow(
                                 radius = 8f.dp * progress,
                                 alpha = progress * if (useOfficialGlassParameters) officialInnerShadowAlpha else 1f
@@ -435,14 +449,14 @@ fun LiquidBottomTabs(
                         }
                     } else null,
                     additionalLayerBlock = {
-                        scaleX = dampedDragAnimation.scaleX
-                        scaleY = dampedDragAnimation.scaleY
-                        val velocity = dampedDragAnimation.velocity / 10f
+                        scaleX = dockDragAnimation.scaleX
+                        scaleY = dockDragAnimation.scaleY
+                        val velocity = dockDragAnimation.velocity / 10f
                         scaleX /= 1f - (velocity * 0.75f).fastCoerceIn(-0.2f, 0.2f)
                         scaleY *= 1f - (velocity * 0.25f).fastCoerceIn(-0.2f, 0.2f)
                     },
                     onDrawSurface = {
-                        val progress = dampedDragAnimation.pressProgress
+                        val progress = dockDragAnimation.pressProgress
                         val neutralAlpha = if (useOfficialGlassParameters) 0.1f else 0.07f
                         drawRect(
                             Color.White.copy(alpha = neutralAlpha),
@@ -455,9 +469,9 @@ fun LiquidBottomTabs(
                         drawRect(Color.Black.copy(alpha = 0.03f * progress))
                     }
                 )
-                .height(indicatorHeight + indicatorHeightOverflow * dampedDragAnimation.pressProgress)
+                .height(indicatorHeight + indicatorHeightOverflow * dockDragAnimation.pressProgress)
                 .then(
-                    Modifier.width(with(density) { tabWidth.toDp() } + indicatorWidthOverflow * dampedDragAnimation.pressProgress)
+                    Modifier.width(with(density) { tabWidth.toDp() } + indicatorWidthOverflow * dockDragAnimation.pressProgress)
                 )
         )
     }

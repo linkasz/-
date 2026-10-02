@@ -76,6 +76,7 @@ class SwuUnifiedAuthActivity : ComponentActivity() {
                     DetailActivityScaffold(
                         title = adapter?.school?.name ?: "教务登录",
                         config = state.config,
+                        useSettingsBackground = true,
                         onBack = ::finish,
                         isolateContentFromBackdrop = true,
                         compactTopBar = true,
@@ -157,7 +158,11 @@ class SwuUnifiedAuthActivity : ComponentActivity() {
                                         if (result.success) {
                                             webView.commitSystemCredentialAutofill()
                                             eduSessionStep("登录态已保存，但刷新任务未能更新，请返回自动刷新页面重试") {
-                                                AutoRefreshScheduleWorker.updateSchedule(app, result.profile)
+                                                AutoRefreshScheduleWorker.updateSchedule(
+                                                    app,
+                                                    result.profile,
+                                                    runImmediately = true
+                                                )
                                             }
                                             setResult(Activity.RESULT_OK)
                                             finish()

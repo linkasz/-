@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Crop the source padding in the drawable; preserve the original artwork and its colors. -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/ic_palette_orange_foreground"
+    android:insetLeft="-14%" android:insetTop="-14%"
+    android:insetRight="-14%" android:insetBottom="-14%" />

@@ -421,9 +421,9 @@ internal object ColorOSCourseTestPreview {
             ?: return json
         val preview = buildJsonObject {
             put("id", 1_900_000_000 + ((startsAt.toEpochSecond() / 60L) % 100_000_000L).toInt())
-            put("courseName", "SleepDown 流体云测试")
+            put("courseName", "时序清单流体云测试")
             put("room", "测试预览")
-            put("teacher", "SleepDown")
+            put("teacher", "时序清单")
             put("startTime", startsAt.toLocalTime().format(timeFormatter))
             put("endTime", expiresAt.toLocalTime().format(timeFormatter))
             put("color", "#ff3f8cff")

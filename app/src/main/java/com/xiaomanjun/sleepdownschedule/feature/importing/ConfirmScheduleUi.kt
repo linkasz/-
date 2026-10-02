@@ -173,7 +173,7 @@ private fun AiImportChatPreview(
     val context = LocalContext.current
     val progress by AiEduImportProgressSession.progress.collectAsStateWithLifecycle()
     val sessionDraft by AiEduImportProgressSession.previewDraft.collectAsStateWithLifecycle()
-    val textColor = glassForegroundColor(settingsVisualConfig(draft.config))
+    val textColor = glassForegroundColor(draft.config)
     var traceExpanded by remember { mutableStateOf(false) }
     var revisionText by remember(draft) { mutableStateOf("") }
     var revising by remember { mutableStateOf(false) }

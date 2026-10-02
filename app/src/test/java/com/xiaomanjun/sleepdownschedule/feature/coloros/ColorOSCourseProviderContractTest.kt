@@ -82,7 +82,8 @@ class ColorOSCourseProviderContractTest {
         ).jsonArray
         val preview = courses.first().jsonObject
 
-        assertEquals("SleepDown 流体云测试", preview.getValue("courseName").jsonPrimitive.content)
+        assertEquals("时序清单流体云测试", preview.getValue("courseName").jsonPrimitive.content)
+        assertEquals("时序清单", preview.getValue("teacher").jsonPrimitive.content)
         assertEquals("02:32", preview.getValue("startTime").jsonPrimitive.content)
         assertEquals("02:37", preview.getValue("endTime").jsonPrimitive.content)
         assertEquals(Instant.parse("2026-09-20T18:32:00Z").epochSecond, preview.getValue("startTimestamp").jsonPrimitive.long)

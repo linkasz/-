@@ -75,10 +75,13 @@ internal object DayAgentRunCoordinator {
         scheduleId: Int,
         facts: DayAgentFacts,
         question: String,
-        imageAttachment: AgentImageAttachment? = null
+        imageAttachment: AgentImageAttachment? = null,
+        onComplete: ((Result<String>) -> Unit)? = null,
+        traceId: String = java.util.UUID.randomUUID().toString()
     ): Boolean {
         val appContext = context.applicationContext
         val app = appContext as CourseScheduleApp
+        val conversationKey = AgentConversationStore.selected(appContext, scheduleId, facts.date)
         val entry = entry(scheduleId, facts.date)
         synchronized(entry) {
             if (entry.job?.isActive == true || entry.state.value.running) return false
@@ -105,6 +108,7 @@ internal object DayAgentRunCoordinator {
                         scheduleId = scheduleId,
                         facts = facts,
                         question = question,
+                        conversationKey = conversationKey,
                         imageAttachment = imageAttachment,
                         onStatus = statusCallback@{ status ->
                             if (entry.generation != generation) return@statusCallback
@@ -139,6 +143,7 @@ internal object DayAgentRunCoordinator {
                             }
                             entry.state.update { it.copy(streamingText = snapshot) }
                         },
+                        traceId = traceId,
                         onStreamReset = resetCallback@{
                             if (entry.generation != generation) return@resetCallback
                             synchronized(buffer) {
@@ -177,6 +182,7 @@ internal object DayAgentRunCoordinator {
                         )
                     }
                 }
+                onComplete?.invoke(result)
                 synchronized(entry) {
                     if (entry.generation == generation) entry.job = null
                 }

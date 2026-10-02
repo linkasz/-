@@ -6,6 +6,7 @@ import android.os.Looper
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
 import android.widget.Toast
+import com.xiaomanjun.sleepdownschedule.MainActivity
 
 class TodoQuickCaptureTileService : TileService() {
     override fun onStartListening() {
@@ -27,7 +28,7 @@ class TodoQuickCaptureTileService : TileService() {
         val bridge = com.xiaomanjun.sleepdownschedule.feature.experimental.XiaomiShizukuBridge
         if (!bridge.isRunning() || !bridge.isAuthorized()) {
             startActivityAndCollapse(
-                Intent(this, TodoActivity::class.java)
+                Intent(this, MainActivity::class.java)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
                     .putExtra(TodoQuickCaptureContract.EXTRA_REQUEST_SHIZUKU, true)
             )
@@ -38,7 +39,7 @@ class TodoQuickCaptureTileService : TileService() {
                 captured.fold(
                     onSuccess = { file ->
                         startActivityAndCollapse(
-                            Intent(this, TodoActivity::class.java)
+                            Intent(this, MainActivity::class.java)
                                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
                                 .putExtra(TodoQuickCaptureContract.EXTRA_SCREENSHOT_PATH, file.absolutePath)
                         )

@@ -29,41 +29,6 @@ object SleepDownRemoteConfig {
 
     fun refresh(scope: CoroutineScope, force: Boolean = true) = Unit
 
-    fun managedFreeSettings(context: Context, effort: AiReasoningEffort): AiImportSettings {
-        val ai = mutableState.value.bootstrap?.ai
-        val profile = managedProfile(ai, effort)
-        val key = if (ai?.availability(estimatedServerTimeSeconds()) == RemoteAiAvailability.AVAILABLE) {
-            runCatching {
-                require(BuildConfig.SLEEPDOWN_REMOTE_AI_ENABLED && BuildConfig.SLEEPDOWN_REMOTE_CONFIG_SECRET.isNotBlank())
-                RemoteSecretCrypto.decrypt(
-                    BuildConfig.SLEEPDOWN_REMOTE_CONFIG_SECRET,
-                    SigningCertificateDigest.current(context),
-                    ai,
-                    context.packageName
-                )
-            }.getOrDefault("")
-        } else ""
-        return AiImportSettings(profile, key)
-    }
-
-    fun isManagedFreeAvailable(context: Context): Boolean = managedFreeSettings(
-        context,
-        AiProviderPresets.dailyFree.reasoningEffort
-    ).let { it.apiKey.isNotBlank() && it.profile.baseUrl.isNotBlank() && it.profile.defaultModel.isNotBlank() }
-
-    fun managedFreeStatusMessage(context: Context): String {
-        val ai = mutableState.value.bootstrap?.ai ?: return "本版本不连接 SleepDown 远程服务。需要 AI 功能时，请配置自己的 API 地址、密钥和模型。"
-        when (ai.availability(estimatedServerTimeSeconds())) {
-            RemoteAiAvailability.DISABLED -> return ai.message.ifBlank { "每日免费 AI 当前正在维护，请稍后重试，或使用自己的 API Key。" }
-            RemoteAiAvailability.EXPIRED -> return ai.message.ifBlank { "每日免费 AI 配置已过期，请稍后重试。" }
-            RemoteAiAvailability.UNSUPPORTED -> return "每日免费 AI 配置版本暂不受支持，请更新应用。"
-            RemoteAiAvailability.AVAILABLE -> Unit
-        }
-        if (!BuildConfig.SLEEPDOWN_REMOTE_AI_ENABLED) return "当前构建未启用每日免费 AI，请使用自己的 API Key。"
-        if (!isManagedFreeAvailable(context)) return "每日免费 AI 安全配置校验失败，请刷新配置或使用自己的 API Key。"
-        return ai.message.ifBlank { "服务正常 · ${ai.model}" }
-    }
-
     fun markNoticeShown(context: Context, notice: RemoteNotice) {
         if (notice.displayMode == "dialog") {
             dialogNoticesShownThisProcess += notice.id
@@ -105,35 +70,6 @@ object SleepDownRemoteConfig {
                 else item.id.toString() !in shown
         }
         mutableExperience.value = RemoteExperienceState(agreement, notice)
-    }
-
-    private fun activateResolvedProvider(context: Context) {
-        runCatching { AiImportSettingsStore.activateAvailableSettings(context) }
-            .onFailure { error ->
-                // A malformed/expired remote credential must remain a normal unavailable state;
-                // it must never prevent the rest of the app from starting.
-                android.util.Log.w("SleepDownRemoteConfig", "Unable to activate cached AI config", error)
-            }
-    }
-
-    private fun managedProfile(ai: RemoteAiConfig?, effort: AiReasoningEffort): AiProviderProfile {
-        val endpoint = if (ai?.endpointStyle == "chat_completions") AiEndpointStyle.CHAT_COMPLETIONS else AiEndpointStyle.RESPONSES
-        val supportsResponses = endpoint == AiEndpointStyle.RESPONSES
-        return AiProviderPresets.dailyFree.copy(
-            baseUrl = ai?.baseUrl.orEmpty(),
-            defaultModel = ai?.model.orEmpty(),
-            // Keep the backend-published MiMo credential on its required custom header even if
-            // the preset defaults are changed later.
-            authType = AiAuthType.CustomHeader,
-            capabilities = AiProviderPresets.dailyFree.capabilities.copy(
-                supportsImageInput = ai?.supportsVision == true,
-                supportsResponses = supportsResponses
-            ),
-            endpointStyle = endpoint,
-            supportsVision = ai?.supportsVision == true,
-            availableModels = listOfNotNull(ai?.model?.takeIf(String::isNotBlank)),
-            reasoningEffort = effort
-        )
     }
 
     internal fun estimatedServerTimeSeconds(): Long = System.currentTimeMillis() / 1_000L

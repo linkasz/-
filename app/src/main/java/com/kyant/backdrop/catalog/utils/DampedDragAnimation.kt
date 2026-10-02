@@ -2,21 +2,24 @@
 // Modified for SleepDown-Schedule.
 package com.kyant.backdrop.catalog.utils
 
+import android.os.Trace
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.MutatorMutex
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.unit.IntSize
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.android.awaitFrame
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.isActive
 import kotlin.math.abs
 
 class DampedDragAnimation(
@@ -28,13 +31,12 @@ class DampedDragAnimation(
     val pressedScale: Float,
     val onDragStarted: DampedDragAnimation.(position: Offset) -> Unit,
     val onDragStopped: DampedDragAnimation.() -> Unit,
+    val onDragCancelled: DampedDragAnimation.() -> Unit = {},
     val onDrag: DampedDragAnimation.(size: IntSize, dragAmount: Offset) -> Unit,
 ) {
 
     private val valueAnimationSpec =
         spring(1f, 1000f, visibilityThreshold)
-    private val velocityAnimationSpec =
-        spring(0.5f, 300f, visibilityThreshold * 10f)
     private val pressProgressAnimationSpec =
         spring(1f, 1000f, 0.001f)
     private val scaleXAnimationSpec =
@@ -44,8 +46,6 @@ class DampedDragAnimation(
 
     private val valueAnimation =
         Animatable(initialValue, visibilityThreshold)
-    private val velocityAnimation =
-        Animatable(0f, 5f)
     private val pressProgressAnimation =
         Animatable(0f, 0.001f)
     private val scaleXAnimation =
@@ -54,38 +54,68 @@ class DampedDragAnimation(
         Animatable(initialScale, 0.001f)
 
     private val mutatorMutex = MutatorMutex()
-
-    private val velocityTracker = VelocityTracker()
+    private val dragTarget = mutableFloatStateOf(initialValue)
+    private var dragTargetJob: Job? = null
 
     val value: Float get() = valueAnimation.value
     val progress: Float get() = (value - valueRange.start) / (valueRange.endInclusive - valueRange.start)
-    val targetValue: Float get() = valueAnimation.targetValue
+    val targetValue: Float get() = dragTarget.floatValue
     val pressProgress: Float get() = pressProgressAnimation.value
     val scaleX: Float get() = scaleXAnimation.value
     val scaleY: Float get() = scaleYAnimation.value
-    val velocity: Float get() = velocityAnimation.value
+    val velocity: Float
+        get() {
+            val range = valueRange.endInclusive - valueRange.start
+            return if (range > 0f) valueAnimation.velocity / range else 0f
+        }
 
     val modifier: Modifier = Modifier.pointerInput(Unit) {
-        inspectDragGestures(
-            onDragStart = { down ->
-                onDragStarted(down.position)
-                press()
-            },
-            onDragEnd = {
-                onDragStopped()
-                release()
-            },
-            onDragCancel = {
-                onDragStopped()
+        var gestureInProgress = false
+        var traceOpen = false
+        fun closeTrace() {
+            if (traceOpen) {
+                Trace.endSection()
+                traceOpen = false
+            }
+        }
+        try {
+            inspectDragGestures(
+                onDragStart = { down ->
+                    gestureInProgress = true
+                    Trace.beginSection("SleepDown.LiquidTabs.Drag")
+                    traceOpen = true
+                    startDragTracking()
+                    onDragStarted(down.position)
+                    press()
+                },
+                onDragEnd = {
+                    gestureInProgress = false
+                    stopDragTracking()
+                    onDragStopped()
+                    release()
+                    closeTrace()
+                },
+                onDragCancel = {
+                    gestureInProgress = false
+                    stopDragTracking()
+                    onDragCancelled()
+                    release()
+                    closeTrace()
+                }
+            ) { change, dragAmount ->
+                onDrag(size, dragAmount)
+            }
+        } finally {
+            if (gestureInProgress) {
+                stopDragTracking()
+                onDragCancelled()
                 release()
             }
-        ) { change, dragAmount ->
-            onDrag(size, dragAmount)
+            closeTrace()
         }
     }
 
     fun press() {
-        velocityTracker.resetTracking()
         animationScope.launch {
             launch { pressProgressAnimation.animateTo(1f, pressProgressAnimationSpec) }
             launch { scaleXAnimation.animateTo(pressedScale, scaleXAnimationSpec) }
@@ -109,44 +139,39 @@ class DampedDragAnimation(
     }
 
     fun updateValue(value: Float) {
-        val targetValue = value.coerceIn(valueRange)
-        animationScope.launch {
-            launch { valueAnimation.animateTo(targetValue, valueAnimationSpec) { updateVelocity() } }
-        }
+        dragTarget.floatValue = value.coerceIn(valueRange)
     }
 
-    fun animateToValue(value: Float) {
+    fun animateToValue(value: Float, releaseAfterAnimation: Boolean = true) {
+        stopDragTracking()
+        val target = value.coerceIn(valueRange)
+        dragTarget.floatValue = target
         animationScope.launch {
             mutatorMutex.mutate {
                 press()
-                val targetValue = value.coerceIn(valueRange)
-                launch { valueAnimation.animateTo(targetValue, valueAnimationSpec) }
-                if (velocity != 0f) {
-                    launch { velocityAnimation.animateTo(0f, velocityAnimationSpec) }
-                }
-                release()
+                launch { valueAnimation.animateTo(target, valueAnimationSpec) }
+                if (releaseAfterAnimation) release()
             }
         }
     }
 
     fun animateToValueAndThen(value: Float, onFinished: () -> Unit) {
+        stopDragTracking()
+        val target = value.coerceIn(valueRange)
+        dragTarget.floatValue = target
         animationScope.launch {
             mutatorMutex.mutate {
                 press()
-                val targetValue = value.coerceIn(valueRange)
                 coroutineScope {
                     launch {
-                        valueAnimation.animateTo(targetValue, valueAnimationSpec) { updateVelocity() }
-                    }
-                    if (velocity != 0f) {
-                        launch { velocityAnimation.animateTo(0f, velocityAnimationSpec) }
+                        valueAnimation.animateTo(target, valueAnimationSpec)
                     }
                     launch {
                         awaitFrame()
                         val threshold = (valueRange.endInclusive - valueRange.start) * 0.025f
-                        if (abs(valueAnimation.value - targetValue) >= threshold) {
+                        if (abs(valueAnimation.value - target) >= threshold) {
                             snapshotFlow { valueAnimation.value }
-                                .filter { abs(it - targetValue) < threshold }
+                                .filter { abs(it - target) < threshold }
                                 .first()
                         }
                         coroutineScope {
@@ -161,12 +186,31 @@ class DampedDragAnimation(
         }
     }
 
-    private fun updateVelocity() {
-        velocityTracker.addPosition(
-            System.currentTimeMillis(),
-            Offset(value, 0f)
-        )
-        val targetVelocity = velocityTracker.calculateVelocity().x / (valueRange.endInclusive - valueRange.start)
-        animationScope.launch { velocityAnimation.animateTo(targetVelocity, velocityAnimationSpec) }
+    private fun startDragTracking() {
+        stopDragTracking()
+        dragTarget.floatValue = value
+        dragTargetJob = animationScope.launch {
+            // Pointer devices may deliver several movement samples before a display frame.
+            // Retarget the spring once per frame instead of cancelling and recreating it for
+            // every sample; this keeps the thumb responsive without queuing animation work.
+            var animatedTarget = valueAnimation.targetValue
+            var targetAnimation: Job? = null
+            while (isActive) {
+                awaitFrame()
+                val target = dragTarget.floatValue
+                if (target != animatedTarget) {
+                    targetAnimation?.cancel()
+                    targetAnimation = launch {
+                        valueAnimation.animateTo(target, valueAnimationSpec)
+                    }
+                    animatedTarget = target
+                }
+            }
+        }
+    }
+
+    private fun stopDragTracking() {
+        dragTargetJob?.cancel()
+        dragTargetJob = null
     }
 }

@@ -2,6 +2,7 @@ package com.xiaomanjun.sleepdownschedule.feature.backup
 
 import com.xiaomanjun.sleepdownschedule.*
 import com.xiaomanjun.sleepdownschedule.feature.agent.*
+import com.xiaomanjun.sleepdownschedule.feature.todo.TodoCalendarSyncState
 
 import java.nio.file.Files
 import org.junit.Assert.assertEquals
@@ -11,6 +12,89 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class BackupRoomRestoreTest {
+    @Test
+    fun archivedRangeAndReminderFieldsRoundTripWithoutDeviceCalendarIds() {
+        val item = com.xiaomanjun.sleepdownschedule.feature.todo.TodoItemEntity(
+            id = 92, title = "归档任务", dueAt = 1_800_000_000_000L, endAt = 1_800_003_600_000L,
+            reminderMode = "BEFORE", reminderOffsetMinutes = 30, persistentReminder = true, strongReminder = true,
+            deletedAt = 1_800_000_000_000L, deletionBatch = "batch-a", calendarEventId = 456,
+            calendarSyncToken = "11111111-1111-4111-8111-111111111111", calendarSyncState = TodoCalendarSyncState.LINKED
+        )
+        val archive = BackupExportMapper.toArchive(metadata(), BackupRoomSnapshot(todoItems = listOf(item)),
+            BackupPreferences(BackupFormatV1.PREFERENCES_VERSION))
+        val decoded = BackupCodec.decode(BackupCodec.encode(archive))
+        val restored = BackupRoomRestoreMapper.map(decoded, BackupImportPlanBuilder.build(decoded, "trash-reminder-roundtrip")).todoItems.single()
+        assertEquals(item.endAt, restored.endAt)
+        assertEquals("BEFORE", restored.reminderMode)
+        assertEquals(30, restored.reminderOffsetMinutes)
+        assertTrue(restored.persistentReminder); assertTrue(restored.strongReminder)
+        assertEquals(item.deletedAt, restored.deletedAt); assertEquals("batch-a", restored.deletionBatch)
+        assertNull(restored.calendarEventId)
+    }
+
+    @Test
+    fun legacyScheduledTodoRequiresCalendarConfirmationAfterRestore() {
+        val item = BackupTodoItem(
+            id = BackupStableId.new(BackupStableId.TODO_PREFIX),
+            title = "旧备份任务",
+            description = "",
+            dueAt = 1_800_000_000_000L,
+            allDay = false,
+            priority = 1,
+            isCompleted = false,
+            isPinned = false,
+            groupId = null,
+            parentId = null,
+            courseId = null,
+            repeatRule = "NONE",
+            createdAt = 1L,
+            updatedAt = 1L,
+            completedAt = null
+        )
+        val archive = BackupArchive(
+            metadata = metadata(),
+            data = BackupData(dataVersion = BackupFormatV1.DATA_VERSION, todoItems = listOf(item)),
+            preferences = BackupPreferences(BackupFormatV1.PREFERENCES_VERSION)
+        )
+        val decoded = BackupCodec.decode(BackupCodec.encode(archive))
+        val plan = BackupImportPlanBuilder.build(decoded, "legacy-calendar-review")
+        val restored = BackupRoomRestoreMapper.map(decoded, plan).todoItems.single()
+
+        assertNull(restored.calendarSyncToken)
+        assertNull(restored.calendarEventId)
+        assertEquals(TodoCalendarSyncState.NEEDS_CONFIRMATION, restored.calendarSyncState)
+        assertEquals("LEGACY", restored.reminderMode)
+        assertNull(restored.deletedAt)
+    }
+
+    @Test
+    fun calendarMarkerRoundTripsButExternalProviderRowIdDoesNot() {
+        val item = com.xiaomanjun.sleepdownschedule.feature.todo.TodoItemEntity(
+            id = 91L,
+            title = "跨设备日历任务",
+            description = "",
+            dueAt = 1_800_000_000_000L,
+            calendarEventId = 456L,
+            calendarSyncToken = "11111111-1111-4111-8111-111111111111",
+            calendarSyncState = TodoCalendarSyncState.LINKED
+        )
+        val archive = BackupExportMapper.toArchive(
+            metadata = metadata(),
+            snapshot = BackupRoomSnapshot(todoItems = listOf(item)),
+            preferences = BackupPreferences(BackupFormatV1.PREFERENCES_VERSION)
+        )
+        val decoded = BackupCodec.decode(BackupCodec.encode(archive))
+        val todo = decoded.data.todoItems.single()
+        val plan = BackupImportPlanBuilder.build(decoded, "calendar-token-roundtrip")
+        val restored = BackupRoomRestoreMapper.map(decoded, plan).todoItems.single()
+
+        assertEquals(item.calendarSyncToken, todo.calendarSyncToken)
+        assertEquals(TodoCalendarSyncState.LINKED, todo.calendarSyncState)
+        assertEquals(item.calendarSyncToken, restored.calendarSyncToken)
+        assertEquals(TodoCalendarSyncState.LINKED, restored.calendarSyncState)
+        assertNull(restored.calendarEventId)
+    }
+
     @Test
     fun restoreMapperUsesPlanIdsAndRebuildsPrivateAgentMarker() {
         val archive = BackupCodec.decode(

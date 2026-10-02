@@ -32,7 +32,9 @@ object BackupStableId {
 
     fun isValid(value: String, prefix: String? = null): Boolean {
         if (value.length > 128) return false
-        val separator = value.indexOf('_')
+        // Prefixes such as "todo_group" contain underscores, so the UUID separator
+        // is the final underscore rather than the first one.
+        val separator = value.lastIndexOf('_')
         if (separator <= 0 || separator == value.lastIndex) return false
         val actualPrefix = value.substring(0, separator)
         if (prefix != null && actualPrefix != prefix) return false
@@ -75,7 +77,10 @@ object BackupAssetPurpose {
 
 object BackupFormatV1 {
     const val FORMAT_VERSION = 1
-    const val PRODUCT = "SleepDown Backup"
+    const val PRODUCT = "时序清单备份"
+    internal const val LEGACY_PRODUCT = "SleepDown Backup"
+    const val FILE_EXTENSION = "shixu"
+    const val MIME_TYPE = "application/vnd.shixu"
     const val DATA_VERSION = 1
     const val PREFERENCES_VERSION = 1
     const val CHECKSUM_VERSION = 1
@@ -198,7 +203,19 @@ data class BackupTodoItem(
     val repeatRule: String,
     val createdAt: Long,
     val updatedAt: Long,
-    val completedAt: Long?
+    val completedAt: Long?,
+    /** Stable app-owned calendar identity; Android's local event row ID is intentionally omitted. */
+    val calendarSyncToken: String? = null,
+    /** Null means this came from a legacy archive with no calendar sync metadata. */
+    val calendarSyncState: String? = null,
+    val endAt: Long? = null,
+    val reminderMode: String = "LEGACY",
+    val reminderOffsetMinutes: Int = 0,
+    val reminderTimeMinutes: Int = 480,
+    val persistentReminder: Boolean = false,
+    val strongReminder: Boolean = false,
+    val deletedAt: Long? = null,
+    val deletionBatch: String? = null
 )
 
 @Serializable
@@ -383,7 +400,8 @@ data class BackupAppIconPreferences(
     val mode: String,
     val style: String = "KANBAN",
     val followsSystemDarkMode: Boolean,
-    val darkTheme: Boolean
+    val darkTheme: Boolean,
+    val palette: String? = null
 )
 
 @Serializable
@@ -398,7 +416,10 @@ data class BackupDayAgentPreferences(
     val memoryTurnCount: Int,
     val memoryLastAgentUpdateDay: String?,
     val appliedActionsBySchedule: Map<String, List<String>> = emptyMap(),
-    val weekAssistantEnabled: Boolean = true
+    val weekAssistantEnabled: Boolean = true,
+    val personaJson: String = "",
+    val personaLibraryJson: String = "",
+    val conversationMetadataBySchedule: Map<String, String> = emptyMap()
 )
 
 @Serializable

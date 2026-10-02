@@ -141,6 +141,9 @@ internal fun TopAssistantSurface(
     shapeProvider: (() -> Shape)? = null,
     surfaceFrame: (() -> Pair<Dp, Float>)? = null,
     materialEnabled: Boolean = true,
+    lightSurface: Boolean = false,
+    frostedConversation: Boolean = false,
+    audioLevel: () -> Float = { 0f },
     content: @Composable BoxScope.() -> Unit = {}
 ) {
     Box(
@@ -166,10 +169,15 @@ internal fun TopAssistantSurface(
             shape = shape,
             shapeProvider = shapeProvider,
             morphAllocation = morphAllocation,
-            baseSurfaceColorOverride = Color.Black,
+            baseSurfaceColorOverride = if (lightSurface) Color.White else Color.Black,
+            restingDecorations = frostedConversation && edgeEffectsEnabled,
             tokens = GlassTokens.dialog(1f).copy(
-                blur = 12.dp, surfaceAlpha = 0.12f, lensHeight = 24.dp, lensAmount = 42.dp,
-                chromaticAberration = false, highlightAlpha = 0.08f, shadowAlpha = 0f
+                blur = if (frostedConversation) 2.dp else 12.dp,
+                surfaceAlpha = if (frostedConversation) .28f else .12f,
+                lensHeight = if (frostedConversation) 12.dp else 24.dp,
+                lensAmount = if (frostedConversation) 24.dp else 42.dp,
+                chromaticAberration = false, highlightAlpha = 0.18f, shadowAlpha = 0.10f,
+                innerShadowAlpha = 0.08f
             ).let { tokens -> if (refractionEnabled) tokens else tokens.copy(lensHeight = 0.dp, lensAmount = 0.dp, depthEffect = false)
             }.let { tokens -> if (edgeEffectsEnabled) tokens else tokens.copy(
                 lensHeight = 0.dp, lensAmount = 0.dp, borderAlpha = 0f, highlightAlpha = 0f,
@@ -177,6 +185,16 @@ internal fun TopAssistantSurface(
             ) },
             debugLabel = "TopAssistantSurface"
         ) {}
+        if (materialEnabled && frostedConversation) Box(
+            Modifier.matchParentSize().then(if (morphAllocation == null) Modifier.clip(shape)
+            else Modifier.graphicsLayer {
+                this.shape = morphAllocation.envelope.insetShapeFor(morphAllocation.geometry())
+                clip = true
+            })
+        ) {
+            AssistantFrostedSurface(backdrop, config, shape, lightSurface, Modifier.matchParentSize(),
+                morphAllocation, shapeProvider)
+        }
         Box(
             Modifier.fillMaxSize().then(if (morphAllocation == null) Modifier.clip(shape) else Modifier.graphicsLayer {
                 this.shape = morphAllocation.envelope.insetShapeFor(morphAllocation.geometry())
@@ -186,7 +204,7 @@ internal fun TopAssistantSurface(
                 val frame = surfaceFrame?.invoke()
                 val header = (frame?.first ?: opaqueHeaderHeight).toPx().coerceIn(0f, bounds.height)
                 val bottomShade = (frame?.second ?: bottomShadeAlpha).coerceIn(0f, 1f)
-                fun shade(alpha: Float) = Color.Black.copy(alpha = alpha + (1f - alpha) * bottomShade)
+                fun shade(alpha: Float) = (if (lightSurface) Color.White else Color.Black).copy(alpha = alpha + (1f - alpha) * bottomShade)
                 val shade = Brush.verticalGradient(
                     0f to shade(0.98f),
                     0.30f to shade(0.88f),
@@ -196,7 +214,18 @@ internal fun TopAssistantSurface(
                     startY = bounds.top + header,
                     endY = maxOf(bounds.top + header + 1f, bounds.bottom)
                 )
-                onDrawBehind { drawRect(shade, bounds.topLeft, bounds.size) }
+                // Stable grain positions are cached with geometry; no bitmap/shader allocations per audio sample.
+                val grain = List(160) { index -> Offset(bounds.left + ((index * 73 % 161) / 161f) * bounds.width,
+                    bounds.top + ((index * 97 % 163) / 163f) * bounds.height) }
+                val highlight = Brush.radialGradient(listOf(Color(0xFFB4DCFF).copy(alpha = .14f), Color.Transparent),
+                    center = Offset(bounds.center.x, bounds.top), radius = bounds.width.coerceAtLeast(1f))
+                onDrawBehind {
+                    // The conversation uses an actual masked blur layer, not this legacy
+                    // opacity-only shade retained by reminders and the education island.
+                    if (!frostedConversation) drawRect(shade, bounds.topLeft, bounds.size)
+                    grain.forEach { drawCircle(if (lightSurface) Color.Black.copy(alpha = .018f) else Color.White.copy(alpha = .025f), .45.dp.toPx(), it) }
+                    drawRect(highlight, bounds.topLeft, bounds.size, alpha = .25f + .75f * audioLevel().coerceIn(0f, 1f))
+                }
             }.then(if (glow) Modifier.drawWithCache {
                 val radius = size.width * 0.70f
                 val cyan = Brush.radialGradient(

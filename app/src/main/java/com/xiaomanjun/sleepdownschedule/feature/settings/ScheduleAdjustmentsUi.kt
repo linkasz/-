@@ -216,6 +216,7 @@ internal fun ScheduleAdjustmentsScreen(
     DetailActivityScaffold(
         title = "调休课表",
         config = state.config,
+        useSettingsBackground = true,
         onBack = ::requestBack
     ) { backdrop ->
         Box(Modifier.fillMaxSize()) {

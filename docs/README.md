@@ -1,5 +1,17 @@
 # 开发文档入口
 
+跨窗口接手应用开发先看 [时序清单开发交接（2026-10-02）](PROJECT_HANDOFF_2026-10-02.md)：包含最新需求、工作树基线、代码入口、验收边界与待办清单。宣传视频由原窗口继续负责。
+
+语音与音色菜单、矩形人格卡片、保留课程下拉浮窗并新增独立 AI 页面，以及图标白边处理见 [本轮修复与实机记录](qa/2026-10-01-menus-assistant-page.md)。
+
+最新人格业务层隔离、上下文工具、百炼专用朗读与待办日历修复见 [本轮交付记录](qa/2026-10-01-persona-tools-calendar.md)。记录区分源码/构建验证与尚未进行的真实服务、设备验收。
+
+最新百炼 ASR / Omni 协议与音色兼容修复见 [本轮记录](qa/2026-10-01-aliyun-realtime-compatibility.md)。账号真实调用与实机语音须单独验收。
+
+最新 AI 浮窗配色与分层玻璃见 [本轮记录](qa/2026-10-01-assistant-wallpaper-glass.md)。实机外观与帧率须单独验收。
+
+最新浅色弹层、语音、天气与双包并存修复见 [本轮记录](qa/2026-10-01-weather-voice-light-coexist.md)。此前目标核对与剩余验收见 [2026-10-01-goal-completion-audit.md](qa/2026-10-01-goal-completion-audit.md)。当前自有仓库为 [linkasz/-](https://github.com/linkasz/-)，具体实现与验证以源码及对应轮次报告为准。
+
 先阅读根目录 [AGENTS.md](../AGENTS.md)，再按问题查阅下列文档。无需在每轮工作前遍历所有文档。
 
 | 任务 | 参考文档 |

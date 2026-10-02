@@ -1,9 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <data-extraction-rules>
     <cloud-backup>
+        <exclude domain="sharedpref" path="scheduleplus_voice.xml" />
+        <exclude domain="sharedpref" path="ai_import_settings.xml" />
         <exclude domain="sharedpref" path="schedule_plus_ai.xml" />
+        <exclude domain="sharedpref" path="schedule_plus_calendar_pending.xml" />
+        <exclude domain="sharedpref" path="widget_pin_request.xml" />
+        <exclude domain="sharedpref" path="vivo_atomic_course.xml" />
     </cloud-backup>
     <device-transfer>
+        <exclude domain="sharedpref" path="scheduleplus_voice.xml" />
+        <exclude domain="sharedpref" path="ai_import_settings.xml" />
         <exclude domain="sharedpref" path="schedule_plus_ai.xml" />
+        <exclude domain="sharedpref" path="schedule_plus_calendar_pending.xml" />
+        <exclude domain="sharedpref" path="widget_pin_request.xml" />
+        <exclude domain="sharedpref" path="vivo_atomic_course.xml" />
     </device-transfer>
 </data-extraction-rules>

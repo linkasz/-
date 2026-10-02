@@ -20,6 +20,7 @@
 | 可重复检索 | `SEARCH_COURSES` | 一次组合关键词、记录 ID、精确名称/教师/地点、星期、节次与教学周；同参数结果走本轮缓存 |
 | 低频写入 | `UPDATE_MEMORY` | 最多提供一次；仍受每日授权和频率 gate 控制 |
 | 外部公开事实 | MiMo `web_search` | 仅官方支持端点提供，不替代本地课表事实 |
+| 真实天气 | `WEATHER_QUICK`（逻辑接口 `weather.quick`） | 会话层异步查询 Open-Meteo；同城市/日期 5 秒合并，不使用五分钟本地课表事实缓存 |
 
 `GET_PERIODS` 是逐节精确时间的唯一来源；`GET_SETTINGS` 只输出设置键与结构化事实，并指向 `GET_PERIODS`，避免同一条计划依赖两份可能不同步的节次事实。`GET_SCHEDULE_ADJUSTMENTS` 提供调休整表，`GET_SCHEDULES` 提供多课表 ID/名称/当前使用状态。询问调休日期时直接使用调休结果或已核对版本的缓存回答；没有保存安排时说明未配置。只有明确要求进入页面时才提出导航，不能用 `OPEN_SETTINGS` 代替查询答案。
 
@@ -48,7 +49,7 @@
 
 设置键存在相互覆盖的组合（`NOTIFICATION_MODE`↔`REALTIME_ACTIVITY`、`COURSE_CARD_COLOR`/`COURSE_CARD_PALETTE`↔`COURSE_CARD_COLOR_MODE`），同组只保留一个，同一键也不得重复。`FOLLOW_SYSTEM_DARK_MODE` 与 `DARK_MODE` 是独立开关，可以组合。图标风格/模式（`APP_ICON_STYLE`、`APP_ICON_MODE`）存于独立 SharedPreferences，走专用写入与回读校验。`GET_SETTINGS` 使用共享表头与紧凑行输出。
 
-相同工具和规范化参数在同一用户回合再次出现时，不再重复序列化完整结果，而是返回事实版本一致的复用提示。每个 provider 仍收到与自己 `call_id` 对应的合法结果，Chat Completions 与 Responses 两条链路遵守相同策略。
+相同工具和规范化参数在同一用户回合再次出现时，复用实际读取结果，不重新查询，也不以“请复用之前结果”的指示文本替代事实。每个 provider 仍收到与自己 `call_id` 对应的合法结果，Chat Completions 与 Responses 两条链路遵守相同策略。
 
 `AgentToolFactCache` 在进程内复用成功读取，最多保留两个课表、每课表 12 项/160000 字符，单项超过 100000 字符不缓存；五分钟到期，当前状态概览在分钟变化时失效。版本包括全学期课程、配置、设置快照、节次、作息方案、日期、天气和课表列表。发送前读取数据库新快照，变更、切换或过期后重新读取；失败结果和记忆写入不缓存。缓存内容仍标记为不可信数据，不提升为指令。
 
@@ -72,7 +73,17 @@ MiMo 联网搜索属于供应商服务端插件，不属于 SleepDown 本地函�
 - 设置：`GET_SETTINGS`。
 - 节次结构可能改变课程实际时间时，在同一轮读取 `GET_PERIODS`、`GET_SETTINGS` 和所需课程范围。
 
-不使用 Kotlin 关键词路由裁掉模型尚未读取的能力；动态收窄只发生在不可变事实已经返回之后，因此不会因为中文表达差异漏掉必要工具。
+课程、待办与设置任务不使用 Kotlin 关键词路由裁掉模型尚未读取的能力；动态收窄只发生在不可变事实已经返回之后。独立天气问句有保守直达路线，复合任务及未匹配表达仍保留完整工具链。
+
+## 天气与语音直达链路
+
+`QuickWeather` 提供真实天气，函数名使用平台兼容的 `WEATHER_QUICK`，解析器也接受 `weather.quick`。city 缺省时使用获准的大致定位；date 缺省时使用本轮可信日期。查询结果包含 ok、city、date、text、temperature、降水概率、时区与来源；未来日期不混用今天的 current 数据。没有结果就说明错误，不使用旧快照或历史对话填补天气。
+
+进程内 Mutex 串行查询，同城市/日期 5 秒内共享结果；临时 HTTP/网络错误重试一次，取消释放网络、定位监听与锁。常见独立天气问题不生成重复模型查询前言，实际 text 进入正常聊天持久化与语音回调。复合任务的工具结果进入 Chat/Responses 原有协议上下文。
+
+`VoiceSession` 的 final 回调等待 800ms，标准化文本 5 秒去重；空闲、聆听、思考、查询、说话分别对应 OFF/LISTENING/THINKING/QUERYING/SPEAKING，连接与错误另有状态。查询中和说话中可打断，朗读遵守用户开关。语音、工具、聊天与朗读共享 traceId，日志仅保留阶段摘要，不记录凭据、录音或坐标。
+
+声纹采用 SiriWave MIT iOS9 衰减曲线的原生 Canvas 移植，实际 RMS/PCM 驱动，静音平线，等待查询用独立圆点。帧率及真实服务/设备结果见对应验收报告，不由源码结构推断。
 
 ## 信任与输出
 

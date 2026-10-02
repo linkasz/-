@@ -137,7 +137,7 @@ internal fun scheduleImportChatTool(): JsonObject = buildJsonObject {
     put("type", JsonPrimitive("function"))
     put("function", buildJsonObject {
         put("name", JsonPrimitive(ScheduleImportToolName))
-        put("description", JsonPrimitive("提交识别完成并可由 SleepDown 本地校验的课程表"))
+        put("description", JsonPrimitive("提交识别完成并可由 时序清单 本地校验的课程表"))
         put("strict", JsonPrimitive(true))
         put("parameters", scheduleJsonSchemaBody())
     })
@@ -156,7 +156,7 @@ internal fun readOriginalSourceChatTool(): JsonObject = buildJsonObject {
 internal fun scheduleImportResponsesTool(): JsonObject = buildJsonObject {
     put("type", JsonPrimitive("function"))
     put("name", JsonPrimitive(ScheduleImportToolName))
-    put("description", JsonPrimitive("提交识别完成并可由 SleepDown 本地校验的课程表"))
+    put("description", JsonPrimitive("提交识别完成并可由 时序清单 本地校验的课程表"))
     put("strict", JsonPrimitive(true))
     put("parameters", scheduleJsonSchemaBody())
 }

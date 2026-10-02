@@ -92,12 +92,12 @@ internal fun ColorOSCourseSettingsSection(
             SettingsInfoRow(
                 title = "后台说明",
                 body = (if (ColorOSCourseExperiment.allowsParallelLiveUpdate(context)) {
-                    if (isHonor) "当前模式会同时使用课程组件与 SleepDown 实时活动。"
+                    if (isHonor) "当前模式会同时使用课程组件与 时序清单 实时活动。"
                     else "课前提醒由流体云显示，实时活动不再重复发送课前提醒；课中、课间及次日课程等其余提醒继续由实时活动显示。"
                 } else "") +
                     "课程组件会保存已同步的课程快照，重启解锁或组件更新后通知系统重新读取。" +
                     "请在系统设置中允许“WakeUp课程表”自启动、关联启动和后台运行；自启动不代表系统不会冻结后台应用。" +
-                    "若强行停止 SleepDown 或课程组件，请重新打开应用并同步。"
+                    "若强行停止 时序清单 或课程组件，请重新打开应用并同步。"
             )
             if (current?.proxyIsSleepDown == true) {
                 SettingsDivider()

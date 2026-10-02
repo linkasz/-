@@ -1,6 +1,7 @@
 package com.xiaomanjun.sleepdownschedule.core.identity
 
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -20,6 +21,8 @@ class AppIdentityTest {
     @Test
     fun productionBackupIsTrustedByProduction() {
         assertTrue(AppIdentity.isTrustedBackupSource(production, production))
+        assertEquals("com.scheduleplus.student", production)
+        assertTrue(AppIdentity.isTrustedBackupSource(AppIdentity.LEGACY_SOURCE_PACKAGE_NAME, production))
     }
 
     @Test

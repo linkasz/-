@@ -1,7 +1,8 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <string name="app_name">课表+</string>
-    <string name="backup_open_with_label">课表+ 恢复</string>
-    <string name="todo_share_label">提取待办到课表+</string>
+    <string name="app_name">时序清单</string>
+    <string name="app_icon_content_description">时序清单应用图标</string>
+    <string name="backup_open_with_label">时序清单恢复</string>
+    <string name="todo_share_label">提取待办到时序清单</string>
     <string name="widget_today_courses_description">今日课程安排</string>
     <string name="widget_today_courses_name">今日课程</string>
     <string name="widget_today_courses_square_description">今日课程（2×2）</string>

@@ -136,7 +136,13 @@ private fun AgentMarkdownTableRow(
 }
 
 private fun parseAgentMarkdown(markdown: String): List<AgentMarkdownBlock> {
-    val lines = markdown.replace("\r\n", "\n").lines()
+    // The same presentation normalization is used for rendered bubbles and readback.
+    val lines = markdown.replace("\r\n", "\n")
+        .replace(Regex("```[^\\n]*\\n([\\s\\S]*?)```"), "$1")
+        .replace(Regex("!?\\[([^]]*)]\\([^)]*\\)"), "$1")
+        .replace(Regex("(?m)^\\s{0,3}(?:#{1,6}\\s+|>\\s*)"), "")
+        .replace(Regex("__([^_]+)__"), "**$1**")
+        .replace(Regex("(?<![\\w*_])[*_]([^*_\\n]+)[*_](?![\\w*_])"), "$1").lines()
     val blocks = mutableListOf<AgentMarkdownBlock>()
     var index = 0
     while (index < lines.size) {
@@ -176,6 +182,17 @@ private fun parseAgentMarkdown(markdown: String): List<AgentMarkdownBlock> {
     }
     return blocks.ifEmpty { listOf(AgentMarkdownBlock.Paragraph(markdown)) }
 }
+
+/** TTS traverses the exact blocks/inline text displayed by AgentMarkdownText. */
+internal fun agentMarkdownPlainText(markdown: String): String = parseAgentMarkdown(markdown).joinToString("\n") { block ->
+    when (block) {
+        is AgentMarkdownBlock.Paragraph -> agentInlineMarkdown(block.text).text
+        is AgentMarkdownBlock.Bullet -> agentInlineMarkdown(block.text).text
+        is AgentMarkdownBlock.Table -> (listOf(block.header) + block.rows).joinToString("\n") { row ->
+            row.joinToString("，") { agentInlineMarkdown(it).text }
+        }
+    }
+}.trim()
 
 private fun isMarkdownTableDivider(line: String): Boolean {
     val cells = markdownCells(line)
