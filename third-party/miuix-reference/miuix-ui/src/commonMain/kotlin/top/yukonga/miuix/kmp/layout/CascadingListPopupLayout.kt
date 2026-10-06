@@ -26,6 +26,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.layout.Placeable
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -111,6 +113,7 @@ internal fun CascadingListPopupLayout(
     }
 
     val currentOnDismiss by rememberUpdatedState(onDismissRequest)
+    val acceptsInput by rememberUpdatedState(show)
     val currentOnDismissFinished by rememberUpdatedState(onDismissFinished)
     val coroutineScope = rememberCoroutineScope()
     // Defer enter until both are measured — otherwise transformOrigin and offset jump on frame 1.
@@ -304,21 +307,31 @@ internal fun CascadingListPopupLayout(
                                 // A blank-area tap closes the whole popup tree in one step. The
                                 // still-focused text field and IME are intentionally left alone;
                                 // a second blank tap may then follow the page's normal IME policy.
-                                currentOnDismiss()
+                                if (acceptsInput) currentOnDismiss()
                             })
-                        },
+                        }
+                        // Keep the measured visual tree through exit, but cancel/consume its
+                        // pointer gestures before descendants can select or reopen a submenu.
+                        .pointerInput(show) {
+                            if (!show) awaitPointerEventScope {
+                                while (true) awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() }
+                            }
+                        }
+                        .onPreviewKeyEvent { !acceptsInput },
                 ) {
                     CascadingMorphSubLayout(
                         entries = entries,
                         expandedItem = expandedItem,
                         displayedItem = displayedItem,
-                        onExpand = { expandedItem = it },
-                        onCollapseSecondary = { expandedItem = null },
+                        onExpand = { if (acceptsInput) expandedItem = it },
+                        onCollapseSecondary = { if (acceptsInput) expandedItem = null },
                         onLeafSelected = { item ->
-                            item.onClick?.invoke()
-                            if (collapseOnSelection) {
-                                expandedItem = null
-                                currentOnDismiss()
+                            if (acceptsInput) {
+                                item.onClick?.invoke()
+                                if (collapseOnSelection) {
+                                    expandedItem = null
+                                    currentOnDismiss()
+                                }
                             }
                         },
                         getAnchorBounds = { anchorBoundsByItem[it] },

@@ -35,6 +35,8 @@ SleepDown 的界面由五个共同特征形成，而不是由单个圆角或某�
 
 Debug 专用 `GlassPreviewActivity` 展示合成背景上的控件、阅读面板、课程卡和助手，不读取用户资料，Release 不注册该 Activity。源码和构建通过不代表当前实机视觉验收；本轮实际验证范围见对应 QA 记录。
 
+级联菜单关闭后保留已测量的视觉树直至退场完成，同时取消后续指针输入、键盘选择和叶节点/展开回调。继续使用原 Miuix 锚点、二级返回与 IME 规则，退场期间不会再次触发菜单操作。
+
 ```text
 core/ui/designsystem/
 ├── SleepDownDesignTokens.kt    # 稳定尺寸、间距、圆角与前景色来源
