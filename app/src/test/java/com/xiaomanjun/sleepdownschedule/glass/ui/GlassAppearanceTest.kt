@@ -28,6 +28,8 @@ class GlassAppearanceTest {
             assertEquals(1f, glassControlPressScale(height, -1f), .00001f)
         }
         assertEquals(1f+4f/48f, glassControlPressScale(48f, 1f), .00001f)
+        assertEquals(1f+1.5f/48f, glassControlPressScale(48f, 1f, expansionDp = 1.5f), .00001f)
+        assertEquals(1f, glassControlPressScale(48f, 1f, expansionDp = 0f), .00001f)
     }
     @Test fun ReducedMotionAndInvalidGeometryHaveNoVisualExpansion() {
         assertEquals(1f, glassControlPressScale(48f, 1f, false), .00001f)

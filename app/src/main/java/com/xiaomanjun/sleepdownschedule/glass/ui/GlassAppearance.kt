@@ -72,6 +72,6 @@ internal fun rememberGlassAppearance(
         Modifier.onGloballyPositioned { geometry.value = it.boundsInWindow() })
 }
 
-internal fun glassControlPressScale(heightDp: Float, progress: Float, motionEnabled: Boolean = true): Float =
-    if (!motionEnabled || !heightDp.isFinite() || !progress.isFinite() || heightDp <= 0f) 1f
-    else 1f + minOf(4f / heightDp, .10f) * progress.coerceIn(0f, 1f)
+internal fun glassControlPressScale(heightDp: Float, progress: Float, motionEnabled: Boolean = true, expansionDp: Float = 4f): Float =
+    if (!motionEnabled || !heightDp.isFinite() || !progress.isFinite() || !expansionDp.isFinite() || heightDp <= 0f) 1f
+    else 1f + minOf(expansionDp.coerceAtLeast(0f) / heightDp, .10f) * progress.coerceIn(0f, 1f)
