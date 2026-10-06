@@ -128,7 +128,8 @@ object SleepDownDesignTokens {
 
 @Composable
 fun sleepDownGlassForegroundColor(config: ScheduleConfigEntity): Color =
-    if (glassUsesLightStyle(config)) Color.Black else Color.White
+    com.xiaomanjun.sleepdownschedule.glass.ui.LocalGlassAppearance.current?.foreground
+        ?: if (glassUsesLightStyle(config)) Color.Black else Color.White
 
 @Composable
 fun sleepDownPanelForegroundColor(config: ScheduleConfigEntity): Color =

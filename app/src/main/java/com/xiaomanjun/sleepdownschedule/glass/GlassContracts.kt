@@ -145,24 +145,24 @@ data class GlassMaterialSpec(
     companion object {
         fun pill(intensity: Float = 1f, reduceTransparency: Boolean = false) = GlassMaterialSpec(
             role = GlassMaterialRole.Pill,
-            blur = if (reduceTransparency) 0.dp else (2.5f * intensity.coerceIn(0.4f, 1.5f)).dp,
+            blur = if (reduceTransparency) 0.dp else (2f * intensity.coerceIn(0.4f, 1.5f)).dp,
             lensHeight = if (reduceTransparency) 0.dp else (12f * intensity.coerceIn(0.4f, 1.5f)).dp,
             lensAmount = if (reduceTransparency) 0.dp else (24f * intensity.coerceIn(0.4f, 1.5f)).dp,
-            surfaceAlpha = if (reduceTransparency) 0.86f else 0.18f,
+            surfaceAlpha = if (reduceTransparency) 0.86f else 0.12f,
             borderAlpha = if (reduceTransparency) 0.18f else 0.32f,
-            highlightAlpha = if (reduceTransparency) 0.04f else 0.055f,
+            highlightAlpha = if (reduceTransparency) 0.04f else 0.12f,
             shadowAlpha = if (reduceTransparency) 0.08f else 0.14f,
             innerShadowAlpha = if (reduceTransparency) 0.05f else 0.09f
         )
 
         fun dialog(intensity: Float = 1f, reduceTransparency: Boolean = false) = GlassMaterialSpec(
             role = GlassMaterialRole.Dialog,
-            blur = if (reduceTransparency) 0.dp else (4f * intensity.coerceIn(0.4f, 1.5f)).dp,
+            blur = if (reduceTransparency) 0.dp else (8f * intensity.coerceIn(0.4f, 1.5f)).dp,
             lensHeight = if (reduceTransparency) 0.dp else (16f * intensity.coerceIn(0.4f, 1.5f)).dp,
             lensAmount = if (reduceTransparency) 0.dp else (32f * intensity.coerceIn(0.4f, 1.5f)).dp,
-            surfaceAlpha = if (reduceTransparency) 0.92f else 0.40f,
+            surfaceAlpha = if (reduceTransparency) 0.92f else 0.30f,
             borderAlpha = if (reduceTransparency) 0.16f else 0.28f,
-            highlightAlpha = if (reduceTransparency) 0.04f else 0.06f,
+            highlightAlpha = if (reduceTransparency) 0.04f else 0.12f,
             shadowAlpha = if (reduceTransparency) 0.08f else 0.18f,
             innerShadowAlpha = if (reduceTransparency) 0.05f else 0.11f
         )
@@ -174,7 +174,7 @@ data class GlassMaterialSpec(
             lensAmount = if (reduceTransparency) 0.dp else 20.dp,
             surfaceAlpha = if (reduceTransparency) 0.92f else 0.52f,
             borderAlpha = if (reduceTransparency) 0.14f else 0.24f,
-            highlightAlpha = if (reduceTransparency) 0.035f else 0.045f,
+            highlightAlpha = if (reduceTransparency) 0.035f else 0.09f,
             shadowAlpha = if (reduceTransparency) 0.08f else 0.14f,
             innerShadowAlpha = if (reduceTransparency) 0.05f else 0.10f
         )

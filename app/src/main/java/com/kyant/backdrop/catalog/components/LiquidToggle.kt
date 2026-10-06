@@ -78,6 +78,7 @@ fun LiquidToggle(
     enabled: Boolean = true
 ) {
     val isLightTheme = !isSystemInDarkTheme()
+    val motionEnabled = rememberGlassMotionEnabled()
     val accentColor =
         if (isLightTheme) Color(0xFF34C759)
         else Color(0xFF30D158)
@@ -193,7 +194,7 @@ fun LiquidToggle(
             lensAmount = 10.dp,
             surfaceAlpha = 1f,
             borderAlpha = 0f,
-            highlightAlpha = 0.45f,
+            highlightAlpha = 0.62f,
             shadowAlpha = 0.05f,
             innerShadowAlpha = 1f,
             chromaticAberration = false,
@@ -297,11 +298,13 @@ fun LiquidToggle(
                         )
                     },
                     additionalLayerBlock = {
-                        scaleX = dampedDragAnimation.scaleX
-                        scaleY = dampedDragAnimation.scaleY
+                        scaleX = if (motionEnabled) dampedDragAnimation.scaleX else 1f
+                        scaleY = if (motionEnabled) dampedDragAnimation.scaleY else 1f
                         val velocity = dampedDragAnimation.velocity / 50f
-                        scaleX /= 1f - (velocity * 0.75f).fastCoerceIn(-0.2f, 0.2f)
-                        scaleY *= 1f - (velocity * 0.25f).fastCoerceIn(-0.2f, 0.2f)
+                        if (motionEnabled) {
+                            scaleX /= 1f - (velocity * 0.75f).fastCoerceIn(-0.2f, 0.2f)
+                            scaleY *= 1f - (velocity * 0.25f).fastCoerceIn(-0.2f, 0.2f)
+                        }
                     },
                     onDrawSurface = {
                         val progress = dampedDragAnimation.pressProgress

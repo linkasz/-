@@ -31,7 +31,9 @@ fun AdaptiveGlassTabs(tabs: List<GlassTab>, selectedId: String, backdrop: Backdr
         val iconOnly = tabs.any { with(density) {
             measurer.measure(AnnotatedString(it.label + (it.count?.let { n -> " $n" } ?: "")), style).size.width.toDp() + 24.dp > cell
         } }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        val appearanceBinding = rememberGlassAppearance(config)
+        CompositionLocalProvider(LocalGlassAppearance provides appearanceBinding.appearance) {
+        Row(appearanceBinding.modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             tabs.forEach { tab ->
                 val selected = tab.id == selectedId
                 val foreground = if (selected) Color.White else if (LocalReadablePanelControls.current) LocalContentColor.current
@@ -55,6 +57,7 @@ fun AdaptiveGlassTabs(tabs: List<GlassTab>, selectedId: String, backdrop: Backdr
                 }
                 }
             }
+        }
         }
     }
 }

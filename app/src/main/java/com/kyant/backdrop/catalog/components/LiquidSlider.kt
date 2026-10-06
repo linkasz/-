@@ -333,6 +333,7 @@ fun LiquidSlider(
     compactThumb: Boolean = false
 ) {
     val isLightTheme = !isSystemInDarkTheme()
+    val motionEnabled = rememberGlassMotionEnabled()
     val accentColor = if (isLightTheme) Color(0xFF0088FF) else Color(0xFF0091FF)
     val trackColor = if (isLightTheme) Color(0xFF787878).copy(0.2f) else Color(0xFF787880).copy(0.36f)
     val trackBackdrop = rememberGlassLayerBackdrop(
@@ -357,7 +358,7 @@ fun LiquidSlider(
             lensAmount = 14.dp,
             surfaceAlpha = 1f,
             borderAlpha = 0f,
-            highlightAlpha = 0.45f,
+            highlightAlpha = 0.62f,
             shadowAlpha = 0.05f,
             innerShadowAlpha = 1f,
             chromaticAberration = false,
@@ -574,11 +575,13 @@ fun LiquidSlider(
                             InnerShadow(radius = 4.dp * progress, alpha = progress)
                         },
                         additionalLayerBlock = {
-                            scaleX = motion.scaleX.value
-                            scaleY = motion.scaleY.value
+                            scaleX = if (motionEnabled) motion.scaleX.value else 1f
+                            scaleY = if (motionEnabled) motion.scaleY.value else 1f
                             val velocity = motion.velocity / 10f
-                            scaleX /= 1f - (velocity * 0.75f).fastCoerceIn(-0.2f, 0.2f)
-                            scaleY *= 1f - (velocity * 0.25f).fastCoerceIn(-0.2f, 0.2f)
+                            if (motionEnabled) {
+                                scaleX /= 1f - (velocity * 0.75f).fastCoerceIn(-0.2f, 0.2f)
+                                scaleY *= 1f - (velocity * 0.25f).fastCoerceIn(-0.2f, 0.2f)
+                            }
                         },
                         onDrawSurface = {
                             drawRect(Color.White.copy(alpha = 1f - motion.pressProgress.value))

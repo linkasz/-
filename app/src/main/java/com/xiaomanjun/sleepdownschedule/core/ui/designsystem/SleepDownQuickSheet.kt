@@ -3,6 +3,9 @@ package com.xiaomanjun.sleepdownschedule.core.ui.designsystem
 import com.xiaomanjun.sleepdownschedule.ScheduleConfigEntity
 import com.xiaomanjun.sleepdownschedule.glass.*
 import com.xiaomanjun.sleepdownschedule.glass.ui.appUsesDarkTheme
+import com.xiaomanjun.sleepdownschedule.glass.ui.rememberGlassAppearance
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import com.xiaomanjun.sleepdownschedule.glass.ui.glassUsesLightStyle
 import com.xiaomanjun.sleepdownschedule.glass.ui.courseCardGlassEffectFrame
 import com.xiaomanjun.sleepdownschedule.glass.ui.courseGlassTintAlpha
@@ -509,9 +512,7 @@ internal fun Modifier.quickSheetBackdropModifier(
     // Centered dialogs are the SleepDown v2 neutral shell with a slightly softer blur. Bottom
     // sheets and their nested quick settings cards keep their original blur budget unchanged.
     val effectiveBlurRadius = when {
-        centered -> SleepDownDesignTokens.CenteredDialog.MaxBlur
-        inner -> blurRadius.coerceAtMost(6.dp)
-        else -> blurRadius.coerceAtMost(12.dp)
+        else -> blurRadius.coerceIn(8.dp, 12.dp)
     }
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || backdrop == null) {
         val fallback = this
@@ -531,12 +532,8 @@ internal fun Modifier.quickSheetBackdropModifier(
         return fallback
     }
     val surfaceAlpha = when {
-        inner && dark -> 0.88f
-        inner -> 0.86f
-        centered && dark -> SleepDownDesignTokens.CenteredDialog.DarkSurfaceAlpha
-        centered -> 0.72f
-        dark -> 0.74f
-        else -> 0.72f
+        dark -> 0.38f
+        else -> 0.30f
     }
     val lensHeight = when {
         centered -> SleepDownDesignTokens.CenteredDialog.LensHeight
@@ -551,7 +548,7 @@ internal fun Modifier.quickSheetBackdropModifier(
     val shellHighlightAlpha = when {
         centered && dark -> 0.14f
         centered -> 0.20f
-        else -> 0f
+        else -> 0.12f
     }
     val material = GlassMaterialSpec.dialog().copy(
         blur = effectiveBlurRadius,
@@ -613,13 +610,8 @@ internal fun Modifier.quickSheetBackdropModifier(
         onDrawSurface = {
             drawRect(
                 when {
-                    inner && dark -> Color(0xFF252B35).copy(alpha = 0.88f)
-                    inner -> Color(0xFFE7EDF7).copy(alpha = 0.86f)
-                    centered && dark -> Color(0xFF1A1A1A).copy(
-                        alpha = SleepDownDesignTokens.CenteredDialog.DarkSurfaceAlpha
-                    )
-                    dark -> Color(0xFF111318).copy(alpha = 0.74f)
-                    else -> Color(0xFFF8FAFD).copy(alpha = 0.72f)
+                    dark -> Color(0xFF111318).copy(alpha = surfaceAlpha)
+                    else -> Color(0xFFF8FAFD).copy(alpha = surfaceAlpha)
                 }
             )
             if (!centered) {
@@ -660,21 +652,21 @@ internal fun QuickSheetLiquidAction(
     height: Dp = SleepDownDesignTokens.Button.MinimumTouchSize,
     onClick: () -> Unit
 ) {
-    val actionModifier = if (modifier == Modifier) Modifier.width(84.dp) else modifier
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val appearanceBinding = rememberGlassAppearance(config, frozen = pressed)
+    val appearance = appearanceBinding.appearance
+    val actionModifier = (if (modifier == Modifier) Modifier.width(84.dp) else modifier).then(appearanceBinding.modifier)
     val centeredAction = height == SleepDownDesignTokens.CenteredDialog.ActionHeight
     // A nested action must not lens the text of the settings page through its modal surface.
     if (backdrop != null && !com.xiaomanjun.sleepdownschedule.glass.ui.LocalReadablePanelControls.current) {
-        val dark = appUsesDarkTheme(config)
+        val dark = !appearance.light
         val neutralSurface = if (accented) {
             Color.White.copy(alpha = 0.90f)
-        } else if (centeredAction && dark) {
-            Color(0xFF363639)
-        } else if (centeredAction) {
-            Color(0xFFD6D9DF).copy(alpha = 0.80f)
         } else if (dark) {
-            Color(0xFF272C36).copy(alpha = 0.92f)
+            Color(0xFF111315).copy(alpha = appearance.controlAlpha)
         } else {
-            Color(0xFFF3F6FB).copy(alpha = 0.90f)
+            Color.White.copy(alpha = appearance.controlAlpha)
         }
         val actionSurfaceColor = when {
             primary -> SleepDownDesignTokens.Button.Primary.copy(alpha = 0.94f)
@@ -692,24 +684,26 @@ internal fun QuickSheetLiquidAction(
             destructive && !centeredAction -> Color.White
             destructive -> Color(0xFFFF453A)
             accented -> SleepDownDesignTokens.Button.Primary
-            else -> MaterialTheme.colorScheme.onSurface
+            else -> appearance.foreground
         }
         LiquidButton(
             onClick = { if (enabled) onClick() },
             backdrop = backdrop,
             modifier = actionModifier.alpha(if (enabled) 1f else .46f).semantics { if (!enabled) disabled() },
             height = height,
-            blurRadius = 12.dp,
-            lensHeight = 4.dp,
-            lensAmount = 6.dp,
+            blurRadius = 2.dp,
+            lensHeight = 12.dp,
+            lensAmount = 24.dp,
             tint = actionTint,
             surfaceColor = actionSurfaceColor,
             contentPadding = PaddingValues(horizontal = 14.dp),
-            isInteractive = !centeredAction,
-            staticPressDimAlpha = if (centeredAction) 0.12f else 0f,
+            isInteractive = true,
+            clickTargetEnabled = enabled,
+            interactionSource = interactionSource,
+            staticPressDimAlpha = 0f,
             shape = Capsule(),
-            shadowEnabled = !centeredAction,
-            highlightEnabled = !centeredAction
+            shadowEnabled = true,
+            highlightEnabled = enabled
         ) {
             Text(label, color = actionTextColor, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
         }

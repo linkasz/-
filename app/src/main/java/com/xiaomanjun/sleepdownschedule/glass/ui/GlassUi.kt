@@ -11,6 +11,13 @@ import com.xiaomanjun.sleepdownschedule.core.performance.LocalGlassQuality
 
 import android.os.Build
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.snap
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.foundation.interaction.PressInteraction
+import com.kyant.backdrop.catalog.utils.InteractiveHighlight
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -525,6 +532,7 @@ fun appUsesDarkTheme(config: ScheduleConfigEntity): Boolean {
 
 @Composable
 fun glassUsesLightStyle(config: ScheduleConfigEntity): Boolean {
+    LocalGlassAppearance.current?.let { return it.light }
     if (config.wallpaperUri.isNullOrBlank()) return !appUsesDarkTheme(config)
     val wallpaperBrightness = LocalPersonalizationPreview.current?.wallpaperBrightness
         ?: config.wallpaperBrightness
@@ -556,6 +564,8 @@ fun GlassSurface(
     selectionProgress: Float? = null,
     onLongClick: (() -> Unit)? = null,
     restingDecorations: Boolean = false,
+    interactionSource: MutableInteractionSource? = null,
+    enabled: Boolean = true,
     content: @Composable () -> Unit
 ) {
     // The modal shell owns glass; sampling its page again inside buttons produces ghost text.
@@ -563,11 +573,46 @@ fun GlassSurface(
     val glassBackdrop = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !readablePanel) backdrop else null
     val useGlass = glassBackdrop != null
     val quality = LocalGlassQuality.current
-    val interactionSource = remember { MutableInteractionSource() }
-    val pressed by interactionSource.collectIsPressedAsState()
-    val pressProgress by animateFloatAsState(if (pressed) 1f else 0f, label = "glass-press")
+    val ownInteractionSource = remember { MutableInteractionSource() }
+    val resolvedInteractionSource = interactionSource ?: ownInteractionSource
+    val pressed by resolvedInteractionSource.collectIsPressedAsState()
+    val motionEnabled = rememberGlassMotionEnabled()
+    val pressProgress by animateFloatAsState(if (pressed && enabled) 1f else 0f,
+        animationSpec = if (motionEnabled) spring(.5f, 300f) else snap(), label = "glass-press")
+    val appearanceBinding = rememberGlassAppearance(config, frozen = pressed)
+    val appearance = appearanceBinding.appearance
+    val scope = rememberCoroutineScope()
+    val interactive = onClick != null || onLongClick != null || interactionSource != null
+    val contactLight = if (interactive) remember(scope) {
+        InteractiveHighlight(scope, ambientAlpha = 0f, spotAlpha = .19f, fallbackAlpha = .19f)
+    } else null
+    var contactPressed by remember { mutableStateOf(false) }
+    LaunchedEffect(resolvedInteractionSource, enabled, contactLight) {
+        if (!enabled) {
+            contactPressed = false
+            contactLight?.updateExternal(Offset.Zero, false)
+        }
+        if (contactLight == null) return@LaunchedEffect
+        resolvedInteractionSource.interactions.collect { event ->
+            when (event) {
+                is PressInteraction.Press -> if (enabled) {
+                    contactPressed = true
+                    contactLight.updateExternal(event.pressPosition, true, true)
+                }
+                is PressInteraction.Release, is PressInteraction.Cancel -> {
+                    contactPressed = false
+                    contactLight.updateExternal(Offset.Zero, false)
+                }
+            }
+        }
+    }
+    val density = LocalDensity.current
+    var heightDp by remember { androidx.compose.runtime.mutableFloatStateOf(48f) }
+    val surfaceModifier = modifier.then(appearanceBinding.modifier).onGloballyPositioned {
+        heightDp = with(density) { it.size.height.toDp().value }
+    }
     val selectedProgress = selectionProgress?.coerceIn(0f, 1f) ?: if (selected) 1f else 0f
-    val lightGlass = if (readablePanel) !appUsesDarkTheme(config) else glassUsesLightStyle(config)
+    val lightGlass = appearance.light
     val hasWallpaper = config.hasAnyWallpaper()
     val base = baseSurfaceColorOverride ?: if (readablePanel) {
         if (lightGlass) Color(0xFFF0F2F6) else Color(0xFF303238)
@@ -577,10 +622,14 @@ fun GlassSurface(
     } else {
         MaterialTheme.colorScheme.primaryContainer
     }
-    val clearAlpha = tokens.surfaceAlpha * quality
+    val clearAlpha = when {
+        tokens.role == GlassMaterialRole.Pill && tokens.surfaceAlpha <= .24f -> appearance.controlAlpha
+        tokens.role == GlassMaterialRole.Dialog && tokens.surfaceAlpha == GlassTokens.dialog().surfaceAlpha -> appearance.readingAlpha
+        else -> tokens.surfaceAlpha
+    } * quality
     val surfaceColor = lerp(base.copy(alpha = clearAlpha), selectedColor, selectedProgress)
     val restHighlightAlpha = if (restingDecorations) tokens.highlightAlpha
-        else if (hasWallpaper) 0f else tokens.highlightAlpha * 0.72f
+        else tokens.highlightAlpha * if (hasWallpaper) 0.65f else 0.72f
     val highlightAlpha = restHighlightAlpha +
         (tokens.highlightAlpha - restHighlightAlpha) * selectedProgress +
         (tokens.highlightAlpha * 0.65f * (1f - selectedProgress) + 0.10f * selectedProgress) * pressProgress
@@ -590,7 +639,8 @@ fun GlassSurface(
         materialRole = tokens.role
     )
     val effectFrame = GlassEffectFrame(
-        blur = tokens.blur * quality,
+        blur = (if (tokens.role == GlassMaterialRole.Dialog && tokens == GlassTokens.dialog())
+            appearance.readingBlur.dp else tokens.blur) * quality,
         lensHeight = tokens.lensHeight * quality * (0.7f + 0.3f * pressProgress),
         lensAmount = tokens.lensAmount * quality * (0.85f + 0.35f * pressProgress),
         useVibrancy = tokens.useVibrancy,
@@ -615,10 +665,11 @@ fun GlassSurface(
         ),
         // Passive glass never receives press events. An identity graphics layer here can
         // retain the previous pixels of a badge while its parent pager layer moves.
-        layerScale = if (onClick == null) null else 1f + 0.055f * pressProgress
+        layerScale = if (onClick == null && interactionSource == null) null
+            else glassControlPressScale(heightDp, pressProgress, motionEnabled)
     )
     val contentModifier = if (useGlass) {
-        modifier.sleepDownGlassSurface(
+        surfaceModifier.sleepDownGlassSurface(
             backdrop = glassBackdrop,
             descriptor = descriptor,
             material = tokens,
@@ -634,22 +685,22 @@ fun GlassSurface(
                     drawRect(surfaceColor)
                 }
                 if (lightGlass) {
-                    drawRect(Color.White.copy(alpha = 0.014f + 0.018f * pressProgress), blendMode = BlendMode.Screen)
+                    drawRect(Color.White.copy(alpha = 0.014f), blendMode = BlendMode.Screen)
                 } else {
-                    drawRect(Color.Black.copy(alpha = 0.014f + 0.018f * pressProgress))
-                    drawRect(Color.White.copy(alpha = 0.006f + 0.010f * pressProgress), blendMode = BlendMode.Screen)
+                    drawRect(Color.Black.copy(alpha = 0.014f))
+                    drawRect(Color.White.copy(alpha = 0.006f), blendMode = BlendMode.Screen)
                 }
             }
         )
     } else {
-        modifier
+        surfaceModifier
             .then(if (morphAllocation == null) Modifier.clip(shape) else Modifier.graphicsLayer {
                 this.shape = morphAllocation.envelope.insetShapeFor(morphAllocation.geometry())
                 clip = true
             })
             .background(surfaceColor.copy(alpha = surfaceColor.alpha.coerceAtLeast(0.86f)))
             .graphicsLayer {
-                val scale = 1f + 0.04f * pressProgress
+                val scale = glassControlPressScale(heightDp, pressProgress, motionEnabled)
                 scaleX = scale
                 scaleY = scale
             }
@@ -657,27 +708,44 @@ fun GlassSurface(
         .then(
             when {
                 onClick != null && onLongClick != null -> Modifier.combinedClickable(
-                    interactionSource = interactionSource,
+                    interactionSource = resolvedInteractionSource,
+                    enabled = enabled,
                     indication = null,
                     role = Role.Button,
                     onClick = onClick,
                     onLongClick = onLongClick
                 )
                 onClick != null -> Modifier.clickable(
-                    interactionSource = interactionSource,
+                    interactionSource = resolvedInteractionSource,
+                    enabled = enabled,
                     indication = null,
                     role = Role.Button,
                     onClick = onClick
                 )
-                onLongClick != null -> Modifier.pointerInput(onLongClick) {
+                onLongClick != null && enabled -> Modifier.pointerInput(onLongClick) {
                     detectTapGestures(onLongPress = { onLongClick() })
                 }
                 else -> Modifier
             }
         )
 
-    Box(modifier = contentModifier) {
-        content()
+    val lightModifier = if (contactLight == null) Modifier else contactLight.modifier
+        .pointerInput(contactLight, enabled) {
+            // Observe motion without consuming or adding another click/drag recognizer.
+            awaitPointerEventScope {
+                while (true) {
+                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                    if (enabled && contactPressed) event.changes.firstOrNull { it.pressed }?.let {
+                        contactLight.updateExternal(it.position, true, true)
+                    }
+                }
+            }
+        }
+    Box(modifier = contentModifier.then(lightModifier)) {
+        CompositionLocalProvider(LocalGlassAppearance provides appearance,
+            androidx.compose.material3.LocalContentColor provides appearance.foreground) {
+            content()
+        }
     }
 }
 

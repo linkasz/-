@@ -648,7 +648,7 @@ fun DialogLiquidButton(
         }
         DialogButtonRole.Neutral -> if (useMonochromeNeutral) {
             (if (controlDark) Color.Black else Color.White)
-                .copy(alpha = if (controlDark) 0.46f else 0.62f)
+                .copy(alpha = if (controlDark) 0.18f else 0.12f)
         } else Color.Transparent
     }
     // Neutral modal controls use their own base instead of lensing the page's text.
@@ -734,7 +734,7 @@ fun DialogCapsuleField(
     val fieldBase = if (dark) Color(0xFF2C2C2E) else Color.White
     val readable = LocalReadablePanelControls.current
     val background = if (readable) (if (dark) Color(0xFF2C2C2E) else Color(0xFFF0F2F6))
-        else fieldBase.copy(alpha = if (dark) 0.54f else 0.70f)
+        else fieldBase.copy(alpha = if (dark) 0.38f else 0.30f)
     val textColor = fieldTextColor ?: LocalContentColor.current
     var focused by remember { mutableStateOf(false) }
     val fieldShape = RoundedRectangle(cornerRadius ?: if (minLines == 1)

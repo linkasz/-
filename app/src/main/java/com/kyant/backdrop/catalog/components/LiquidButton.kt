@@ -88,10 +88,13 @@ fun LiquidButton(
     pressSnapshot: LiquidButtonPressSnapshot? = null,
     sharedInteractiveHighlight: InteractiveHighlight? = null,
     interactionEnabledAt: (size: Size, offset: Offset) -> Boolean = { _, _ -> true },
+    interactionSource: MutableInteractionSource? = null,
     content: @Composable RowScope.() -> Unit
 ) {
     val animationScope = rememberCoroutineScope()
-    val clickInteractionSource = remember { MutableInteractionSource() }
+    val motionEnabled = rememberGlassMotionEnabled()
+    val ownInteractionSource = remember { MutableInteractionSource() }
+    val clickInteractionSource = interactionSource ?: ownInteractionSource
     val pressed by clickInteractionSource.collectIsPressedAsState()
     val latestInteractionEnabledAt = rememberUpdatedState(interactionEnabledAt)
 
@@ -173,7 +176,7 @@ fun LiquidButton(
                 effectsOverride = buttonEffects,
                 highlightOverride = if (highlightEnabled) ({ Highlight.Default }) else null,
                 shadowOverride = if (shadowEnabled) ({ shadowStyle }) else null,
-                additionalLayerBlock = if (isInteractive) {
+                additionalLayerBlock = if (isInteractive && motionEnabled) {
                     {
                         val width = size.width
                         val height = size.height
@@ -181,7 +184,7 @@ fun LiquidButton(
                         val progress = interactiveHighlight.pressProgress
                         pressSnapshot?.progress = progress
                         val expansionPx = pressExpansion.toPx()
-                        val scale = lerp(1f, 1f + expansionPx / size.height, progress)
+                        val scale = glassControlPressScale(size.height / density, progress)
 
                         val maxOffset = size.minDimension
                         val initialDerivative = 0.05f
@@ -199,6 +202,8 @@ fun LiquidButton(
                             scale +
                                     maxDragScale * abs(sin(offsetAngle) * offset.y / size.maxDimension) *
                                     (height / width).fastCoerceAtMost(1f)
+                        scaleX = scaleX.coerceIn(1f, 1.10f)
+                        scaleY = scaleY.coerceIn(1f, 1.10f)
                     }
                 } else {
                     null

@@ -11,6 +11,8 @@ import com.xiaomanjun.sleepdownschedule.glass.rememberGlassLayerBackdrop
 import com.xiaomanjun.sleepdownschedule.glass.glassBackdropProducer
 import com.xiaomanjun.sleepdownschedule.glass.sleepDownGlassSurface
 import com.xiaomanjun.sleepdownschedule.glass.ui.appUsesDarkTheme
+import com.xiaomanjun.sleepdownschedule.glass.ui.GlassAppearance
+import com.xiaomanjun.sleepdownschedule.glass.ui.rememberGlassAppearance
 import com.xiaomanjun.sleepdownschedule.core.ui.designsystem.sleepDownPanelForegroundColor
 import com.xiaomanjun.sleepdownschedule.core.ui.designsystem.LocalCenteredDialogRenderInRootScaffold
 import android.os.Build
@@ -144,20 +146,21 @@ internal fun calculateUpwardDropdownPosition(
 private fun Modifier.miuixCascadingPopupSurface(
     backdrop: Backdrop?,
     config: ScheduleConfigEntity,
-    blurRadius: Dp
+    blurRadius: Dp,
+    appearance: GlassAppearance? = null
 ): Modifier {
-    val dark = appUsesDarkTheme(config)
+    val dark = appearance?.light?.not() ?: appUsesDarkTheme(config)
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || backdrop == null) {
         return background(if (dark) Color(0xFF242424) else Color.White)
     }
-    val effectiveBlur = blurRadius.coerceAtMost(12.dp)
+    val effectiveBlur = (appearance?.readingBlur?.dp ?: blurRadius).coerceIn(8.dp, 12.dp)
     // Keep the lens gentle: an overlarge lens/refraction band refracts content against the
     // rounded popup corners and reads as torn glass lines at the bottom corners.
     val lensHeight = 16.dp
     val lensAmount = 22.dp
-    val surfaceAlpha = if (dark) 0.74f else 0.64f
+    val surfaceAlpha = appearance?.readingAlpha ?: if (dark) 0.38f else 0.30f
     val surfaceColor = if (dark) Color(0xFF242424) else Color.White
-    val topHighlightAlpha = if (dark) 0.10f else 0.07f
+    val topHighlightAlpha = if (dark) 0.14f else 0.12f
     val material = GlassMaterialSpec.popup(effectiveBlur).copy(
         lensHeight = lensHeight,
         lensAmount = lensAmount,
@@ -225,7 +228,8 @@ private fun Modifier.miuixCascadingPopupSurface(
 private fun rememberMiuixListPopupStyle(
     backdrop: Backdrop?,
     config: ScheduleConfigEntity,
-    cornerRadius: Dp = 25.dp
+    cornerRadius: Dp = 25.dp,
+    appearance: GlassAppearance? = null
 ): ListPopupVisualStyle = ListPopupVisualStyle(
     // Keep the stock Miuix reveal geometry; only the pixels painted inside that surface are
     // replaced by the SleepDown glass material. Corner radius follows the NexioSchedule
@@ -233,7 +237,8 @@ private fun rememberMiuixListPopupStyle(
     surfaceModifier = Modifier.miuixCascadingPopupSurface(
         backdrop = backdrop,
         config = config,
-        blurRadius = 10.dp
+        blurRadius = 8.dp,
+        appearance = appearance
     ),
     backgroundColor = Color.Transparent,
     cornerRadius = cornerRadius
@@ -358,14 +363,16 @@ internal fun SleepDownLiquidCascadingPopup(
     } else {
         primaryPopupBackdrop
     }
-    val popupContentColor = contentColor ?: sleepDownPanelForegroundColor(config)
+    val popupAppearance = rememberGlassAppearance(config, frozen = show, bounds = anchorBounds).appearance
+    val popupContentColor = contentColor ?: popupAppearance.foreground
     val entry = remember(items, popupContentColor) {
         DropdownEntry(items.map { it.asMiuixDropdownItem(popupContentColor) })
     }
     val basePrimaryVisualStyle = rememberMiuixListPopupStyle(
         backdrop = completeUnderlayBackdrop,
         config = config,
-        cornerRadius = 25.dp
+        cornerRadius = 25.dp,
+        appearance = popupAppearance
     )
     val popupVisualStyle = basePrimaryVisualStyle.copy(
         surfaceModifier = Modifier
@@ -375,10 +382,11 @@ internal fun SleepDownLiquidCascadingPopup(
     val secondaryPopupVisualStyle = rememberMiuixListPopupStyle(
         backdrop = secondaryUnderlayBackdrop,
         config = config,
-        cornerRadius = 25.dp
+        cornerRadius = 25.dp,
+        appearance = popupAppearance
     )
     val popupRowColors = rememberSleepDownPopupRowColors(
-        contentColor ?: sleepDownPanelForegroundColor(config)
+        popupContentColor
     )
     val popupPositionProvider = remember(horizontalSafeInset, anchorBounds) {
         UpwardDropdownPositionProvider(horizontalSafeInset, anchorBounds)

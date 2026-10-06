@@ -23,8 +23,8 @@ internal data class AssistantGlassPalette(val light: Boolean) {
     val accent: Color get() = if (light) Color(0xFF087EF1) else Color(0xFF67BEFF)
     val controlTokens: GlassTokens get() = GlassTokens.pill().copy(
         blur = 2.dp, lensHeight = 12.dp, lensAmount = 24.dp,
-        surfaceAlpha = if (light) .42f else .46f,
-        highlightAlpha = .16f, shadowAlpha = .08f, innerShadowAlpha = .08f
+        surfaceAlpha = if (light) .12f else .18f,
+        highlightAlpha = .22f, shadowAlpha = .10f, innerShadowAlpha = .08f
     )
     // Thin clear controls share the Siri-style composer's refraction and readable adaptive polarity.
     val composerTokens: GlassTokens get() = controlTokens.copy(

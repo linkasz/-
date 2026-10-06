@@ -11,6 +11,8 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import com.kyant.backdrop.Backdrop
+import com.xiaomanjun.sleepdownschedule.glass.ui.LocalGlassAppearance
+import com.xiaomanjun.sleepdownschedule.glass.ui.rememberGlassAppearance
 import com.xiaomanjun.sleepdownschedule.model.ScheduleConfigEntity
 
 internal data class GlassAction(val label: String, val icon: ImageVector, val enabled: Boolean = true,
@@ -28,7 +30,9 @@ internal fun AdaptiveGlassActions(actions: List<GlassAction>, backdrop: Backdrop
     BoxWithConstraints(modifier.fillMaxWidth()) {
         val width = (maxWidth - 8.dp * (actions.size - 1)) / actions.size
         val icons = actions.any { with(density) { measurer.measure(AnnotatedString(it.label), style).size.width.toDp() + 28.dp > width } }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        val appearanceBinding = rememberGlassAppearance(config)
+        CompositionLocalProvider(LocalGlassAppearance provides appearanceBinding.appearance) {
+        Row(appearanceBinding.modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             actions.forEach { action ->
                 // TooltipBox's modifier is inside another layout; Row weights belong on its direct child.
                 Box(Modifier.weight(1f)) {
@@ -51,6 +55,7 @@ internal fun AdaptiveGlassActions(actions: List<GlassAction>, backdrop: Backdrop
                 }
                 }
             }
+        }
         }
     }
 }

@@ -104,6 +104,7 @@ fun LiquidBottomTabs(
     content: @Composable RowScope.() -> Unit
 ) {
     val isLightTheme = isLightThemeOverride ?: !isSystemInDarkTheme()
+    val motionEnabled = rememberGlassMotionEnabled()
     // Theme ownership can change when a dock moves between wallpaper-adaptive Home and the app
     // themed settings page. Keep one Kyant surface alive and crossfade its material after the tab
     // settles; recreating light/dark surfaces at release produces a visible one-frame flash.
@@ -113,7 +114,7 @@ fun LiquidBottomTabs(
         label = "LiquidBottomTabsThemeBlend"
     )
     val animatedContainerAlpha by animateFloatAsState(
-        targetValue = containerAlpha,
+        targetValue = containerAlpha * .72f,
         animationSpec = tween(220),
         label = "LiquidBottomTabsContainerAlpha"
     )
@@ -335,7 +336,7 @@ fun LiquidBottomTabs(
                     highlightOverride = { Highlight.Default },
                     additionalLayerBlock = {
                         val progress = dockDragAnimation.pressProgress
-                        val scale = lerp(1f, 1f + 16f.dp.toPx() / size.width, progress)
+                        val scale = if (motionEnabled) lerp(1f, 1f + 16f.dp.toPx() / size.width, progress) else 1f
                         scaleX = scale
                         scaleY = scale
                     },
@@ -449,11 +450,13 @@ fun LiquidBottomTabs(
                         }
                     } else null,
                     additionalLayerBlock = {
-                        scaleX = dockDragAnimation.scaleX
-                        scaleY = dockDragAnimation.scaleY
+                        scaleX = if (motionEnabled) dockDragAnimation.scaleX else 1f
+                        scaleY = if (motionEnabled) dockDragAnimation.scaleY else 1f
                         val velocity = dockDragAnimation.velocity / 10f
-                        scaleX /= 1f - (velocity * 0.75f).fastCoerceIn(-0.2f, 0.2f)
-                        scaleY *= 1f - (velocity * 0.25f).fastCoerceIn(-0.2f, 0.2f)
+                        if (motionEnabled) {
+                            scaleX /= 1f - (velocity * 0.75f).fastCoerceIn(-0.2f, 0.2f)
+                            scaleY *= 1f - (velocity * 0.25f).fastCoerceIn(-0.2f, 0.2f)
+                        }
                     },
                     onDrawSurface = {
                         val progress = dockDragAnimation.pressProgress
