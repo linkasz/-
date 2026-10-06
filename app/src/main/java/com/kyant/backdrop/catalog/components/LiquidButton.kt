@@ -183,6 +183,7 @@ fun LiquidButton(
 
                         val progress = interactiveHighlight.pressProgress
                         pressSnapshot?.progress = progress
+                        val expansionPx = pressExpansion.toPx()
                         val scale = glassControlPressScale(size.height / density, progress, expansionDp = pressExpansion.value)
 
                         val maxOffset = size.minDimension
