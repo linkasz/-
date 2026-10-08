@@ -269,6 +269,9 @@ object BackupImportPlanBuilder {
         archive.preferences.appIcon?.let {
             strictEnum<AppIconMode>(it.mode, "app icon mode")
         }
+        archive.preferences.dayAgent?.conversationMetadataBySchedule?.keys?.forEach { scheduleId ->
+            require(archive.data.schedules.any { it.id == scheduleId }) { "对话元数据引用了不存在的课表" }
+        }
         archive.preferences.aiImport?.let { ai ->
             ai.providers.forEach { provider ->
                 strictEnum<AiProviderType>(provider.providerType, "AI providerType")

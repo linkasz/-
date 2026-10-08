@@ -45,6 +45,7 @@ object AiImportSettingsStore {
     private const val KeyEncryptedApiKey = "encrypted_api_key"
     private const val KeyCustomProviders = "custom_provider_profiles_v1"
     private const val KeyManagedFreeOfferDecision = "managed_free_offer_decision_v1"
+    private const val KeyRetiredFreeNeedsConfiguration = "retired_free_needs_configuration"
     private const val ManagedFreeOfferEnabled = "enabled"
     private const val ManagedFreeOfferDeclined = "declined"
     private val settingsJson = Json { ignoreUnknownKeys = true }
@@ -57,18 +58,6 @@ object AiImportSettingsStore {
     }
 
     fun notifyRemoteConfigChanged() = notifyChanged()
-
-    private fun managedFreeSettings(context: Context, prefs: android.content.SharedPreferences): AiImportSettings {
-        val effort = runCatching {
-            AiReasoningEffort.valueOf(
-                prefs.getString(
-                    providerKey(KeyReasoningEffort, AiProviderPresets.dailyFree.id),
-                    AiProviderPresets.dailyFree.reasoningEffort.name
-                ).orEmpty()
-            )
-        }.getOrDefault(AiProviderPresets.dailyFree.reasoningEffort)
-        return SleepDownRemoteConfig.managedFreeSettings(context, effort)
-    }
 
     fun hasUserConfiguredApiKey(context: Context): Boolean {
         val profiles = (AiProviderPresets.all + selectableProfiles(context))
@@ -88,11 +77,11 @@ object AiImportSettingsStore {
      *
      * The settings page keeps keys scoped to each provider, so the selected provider can be
      * "关闭" (or an incomplete draft) while a valid bound provider still exists. Entry points
-     * must not interpret that state as "no key". If no user provider is usable, the remotely
-     * managed daily-free provider is a valid fallback whenever its signed configuration is ready.
+     * may use another complete user-owned profile. Retired free profiles never participate.
      */
     fun resolveAvailableSettings(context: Context): AiImportSettings? {
         load(context).takeIf { it.isReadyForUse() }?.let { return it }
+        if (retiredFreeNeedsConfiguration(context)) return null
 
         val userSettings = selectableProfiles(context)
             .asSequence()
@@ -101,12 +90,7 @@ object AiImportSettingsStore {
             .firstOrNull { it.isReadyForUse() }
         if (userSettings != null) return userSettings
 
-        val prefs = context.getSharedPreferences(PrefName, Context.MODE_PRIVATE)
-        // A user who explicitly declined the managed offer must not be silently switched back
-        // after a later remote-config refresh. Otherwise an updated bootstrap would overwrite the
-        // user's provider choice even though the encrypted credential is correctly cached.
-        if (prefs.getString(KeyManagedFreeOfferDecision, null) == ManagedFreeOfferDeclined) return null
-        return managedFreeSettings(context, prefs).takeIf { it.isReadyForUse() }
+        return null
     }
 
     /** Makes the resolved fallback active so the service and runtime picker read the same model. */
@@ -121,28 +105,12 @@ object AiImportSettingsStore {
     /**
      * Reads the configuration that a network request can actually use. UI settings may display an
      * incomplete selected draft, but request services must fall back to a complete user profile or
-     * the signed daily-free configuration instead of sending an empty key.
+     * fail as unconfigured instead of sending an empty key.
      */
     fun loadForRuntime(context: Context): AiImportSettings? = resolveAvailableSettings(context)
 
-    fun shouldOfferManagedFreeAi(context: Context): Boolean {
-        val prefs = context.getSharedPreferences(PrefName, Context.MODE_PRIVATE)
-        if (prefs.contains(KeyManagedFreeOfferDecision)) return false
-        if (load(context).profile.id == AiProviderPresets.dailyFree.id) return false
-        return !hasUserConfiguredApiKey(context) && SleepDownRemoteConfig.isManagedFreeAvailable(context)
-    }
-
-    fun enableManagedFreeAi(context: Context) {
-        val prefs = context.getSharedPreferences(PrefName, Context.MODE_PRIVATE)
-        prefs.edit { putString(KeyManagedFreeOfferDecision, ManagedFreeOfferEnabled) }
-        save(context, managedFreeSettings(context, prefs))
-    }
-
-    fun declineManagedFreeAi(context: Context) {
-        context.getSharedPreferences(PrefName, Context.MODE_PRIVATE).edit {
-            putString(KeyManagedFreeOfferDecision, ManagedFreeOfferDeclined)
-        }
-    }
+    fun retiredFreeNeedsConfiguration(context: Context): Boolean =
+        context.getSharedPreferences(PrefName, Context.MODE_PRIVATE).getBoolean(KeyRetiredFreeNeedsConfiguration, false)
 
     fun selectableProfiles(context: Context): List<AiProviderProfile> {
         val prefs = context.getSharedPreferences(PrefName, Context.MODE_PRIVATE)
@@ -167,6 +135,7 @@ object AiImportSettingsStore {
      */
     fun exportForBackup(context: Context): BackupAiImportPreferences {
         val prefs = context.getSharedPreferences(PrefName, Context.MODE_PRIVATE)
+        load(context) // Apply retirement migration before taking a backup snapshot.
         val selectedProviderId = prefs.getString(KeyProviderId, AiProviderPresets.none.id).orEmpty()
         val presets = (selectableProfiles(context) + AiProviderPresets.byId(selectedProviderId))
             .distinctBy(AiProviderProfile::id)
@@ -175,22 +144,25 @@ object AiImportSettingsStore {
         }
         return BackupAiImportPreferences(
             selectedProviderId = selectedProviderId.ifBlank { AiProviderPresets.none.id },
-            managedFreeOfferDecision = prefs.getString(KeyManagedFreeOfferDecision, null),
+            managedFreeOfferDecision = null,
             providers = profiles.map { it.toBackupProvider() }
         )
     }
 
     /** Applies only the non-secret provider fields; existing encrypted API keys are untouched. */
     fun applyBackupPreferences(context: Context, backup: BackupAiImportPreferences) {
-        val providerProfiles = backup.providers
+        val compatible = prepareBackupForRestore(backup)
+        val providerProfiles = compatible.providers
             .map { provider -> provider.fromBackupProvider(context) }
             .distinctBy(AiProviderProfile::id)
-        val profiles = if (providerProfiles.isEmpty() && backup.selectedProviderId == AiProviderPresets.none.id) {
+        val selectedId = compatible.selectedProviderId
+        val providerProfilesWithNone = if (selectedId == AiProviderPresets.none.id && providerProfiles.none { it.id == selectedId }) providerProfiles + AiProviderPresets.none else providerProfiles
+        val profiles = if (providerProfilesWithNone.isEmpty() && selectedId == AiProviderPresets.none.id) {
             listOf(AiProviderPresets.none)
         } else {
-            providerProfiles
+            providerProfilesWithNone
         }
-        val selected = profiles.firstOrNull { it.id == backup.selectedProviderId }
+        val selected = profiles.firstOrNull { it.id == selectedId }
             ?: throw IllegalArgumentException("AI selectedProviderId 不在备份 provider 列表中")
         val customEntries = profiles
             .filter { AiProviderPresets.isCustomId(it.id) }
@@ -203,15 +175,19 @@ object AiImportSettingsStore {
             if (customEntries.isEmpty()) remove(KeyCustomProviders)
             else putString(KeyCustomProviders, settingsJson.encodeToString(customEntries))
             putString(KeyProviderId, selected.id)
+            putBoolean(KeyRetiredFreeNeedsConfiguration, AiProviderPresets.isManagedFreeId(backup.selectedProviderId))
             writeGlobalSettings(this, selected)
-            if (backup.managedFreeOfferDecision == null) {
-                remove(KeyManagedFreeOfferDecision)
-            } else {
-                putString(KeyManagedFreeOfferDecision, backup.managedFreeOfferDecision)
-            }
+            remove(KeyManagedFreeOfferDecision)
         }.commit()
         check(committed) { "无法提交 AI import preferences" }
         notifyChanged()
+    }
+
+    internal fun prepareBackupForRestore(backup: BackupAiImportPreferences): BackupAiImportPreferences {
+        val selected = if (AiProviderPresets.isManagedFreeId(backup.selectedProviderId)) AiProviderPresets.none.id else backup.selectedProviderId
+        val profiles = backup.providers.filterNot { AiProviderPresets.isManagedFreeId(it.id) }
+        return backup.copy(selectedProviderId = selected, managedFreeOfferDecision = null,
+            providers = if (selected == AiProviderPresets.none.id && profiles.none { it.id == selected }) profiles + AiProviderPresets.none.toBackupProvider() else profiles)
     }
 
     fun createCustomProvider(): AiProviderProfile {
@@ -437,9 +413,13 @@ object AiImportSettingsStore {
     fun load(context: Context): AiImportSettings {
         val prefs = context.getSharedPreferences(PrefName, Context.MODE_PRIVATE)
         val savedProviderId = prefs.getString(KeyProviderId, AiProviderPresets.none.id).orEmpty()
+        if (AiProviderPresets.isManagedFreeId(savedProviderId)) {
+            prefs.edit { putString(KeyProviderId, AiProviderPresets.none.id); putBoolean(KeyRetiredFreeNeedsConfiguration, true); remove(KeyManagedFreeOfferDecision) }
+            return AiImportSettings(AiProviderPresets.none, "")
+        }
         val preset = selectableProfiles(context).firstOrNull { it.id == savedProviderId }
             ?: AiProviderPresets.none
-        if (AiProviderPresets.isManagedFreeId(preset.id)) return managedFreeSettings(context, prefs)
+        if (AiProviderPresets.isManagedFreeId(preset.id)) return AiImportSettings(AiProviderPresets.none, "")
         val providerType = runCatching {
             AiProviderType.valueOf(prefs.getString(KeyProviderType, preset.providerType.name).orEmpty())
         }.getOrDefault(preset.providerType)
@@ -500,7 +480,7 @@ object AiImportSettingsStore {
         val prefs = context.getSharedPreferences(PrefName, Context.MODE_PRIVATE)
         val current = load(context)
         val preset = presetFor(context, providerId)
-        if (AiProviderPresets.isManagedFreeId(preset.id)) return managedFreeSettings(context, prefs)
+        if (AiProviderPresets.isManagedFreeId(preset.id)) return AiImportSettings(AiProviderPresets.none, "")
         val profile = when {
             current.profile.id == preset.id -> current.profile
             !prefs.contains(providerKey(KeyBaseUrl, preset.id)) -> preset
@@ -611,22 +591,12 @@ object AiImportSettingsStore {
     }
 
     fun save(context: Context, settings: AiImportSettings) {
+        require(!AiProviderPresets.isManagedFreeId(settings.profile.id)) { "每日免费 AI 已移除，请配置自己的 AI 服务" }
         val prefs = context.getSharedPreferences(PrefName, Context.MODE_PRIVATE)
-        if (AiProviderPresets.isManagedFreeId(settings.profile.id)) {
-            prefs.edit {
-                putString(KeyProviderId, AiProviderPresets.dailyFree.id)
-                putString(
-                    providerKey(KeyReasoningEffort, AiProviderPresets.dailyFree.id),
-                    settings.profile.reasoningEffort.name
-                )
-                putString(KeyManagedFreeOfferDecision, ManagedFreeOfferEnabled)
-                remove(apiKeyKey(AiProviderPresets.dailyFree.id))
-            }
-            notifyChanged()
-            return
-        }
+
         prefs.edit {
             putString(KeyProviderId, settings.profile.id)
+            remove(KeyRetiredFreeNeedsConfiguration)
             putString(KeyBaseUrl, normalizeAiBaseUrlForProvider(settings.profile.id, settings.profile.baseUrl))
             putString(KeyModel, settings.profile.defaultModel)
             putString(KeyProviderType, settings.profile.providerType.name)
@@ -733,7 +703,7 @@ object AiImportSettingsStore {
         notifyChanged()
     }
 
-    private fun encrypt(context: Context, value: String): String {
+    internal fun encrypt(context: Context, value: String): String {
         if (value.isBlank()) return ""
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
@@ -742,7 +712,7 @@ object AiImportSettingsStore {
         return Base64.encodeToString(payload, Base64.NO_WRAP)
     }
 
-    private fun decrypt(context: Context, value: String): String {
+    internal fun decrypt(context: Context, value: String): String {
         if (value.isBlank()) return ""
         return runCatching {
             val payload = Base64.decode(value, Base64.NO_WRAP)

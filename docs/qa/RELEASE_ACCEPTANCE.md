@@ -28,6 +28,7 @@
 - [ ] 手动同步两次、编辑任务后同步、删除任务后同步；系统日历中不产生重复事件，已同步事件按既定策略更新或移除。
 - [ ] 开启自动同步后创建、编辑、完成和删除待办；与手动同步交错操作仍保持幂等。
 - [ ] 首次拒绝日历权限、之后授予，再撤回权限；应用显示可恢复提示，不崩溃、不丢本地任务。
+- [ ] 撤权期间完成或删除已同步待办；恢复权限后执行同步，确认遗留日历事件被清理且没有重复事件。
 - [ ] 课程提醒和待办提醒发生在相邻时间时检查通知去重；点击通知直接打开对应课程或待办，完成/删除后旧通知不再打开失效项目。
 - [ ] 通知权限拒绝后再授予；检查已排程提醒是否按产品规则恢复且没有重复通知。
 
@@ -51,6 +52,7 @@
 - [ ] 使用 MigrationTestHelper 从 Room 42 升到当前 schema；课程数据保留，分组外键设为 NULL、子任务级联行为符合 schema。
 - [ ] 从旧 applicationId 导出的 `.sleepdown` 导入；课程、学期、时间设置恢复，错误条目不阻断其他数据。
 - [ ] BackupFormatV1 导出后清单含待办、分组、子任务和课程关联；calendarEventId、API Key 与密钥不写入备份。
+- [ ] Android 云备份与设备迁移不包含待清理的系统日历事件 ID。
 - [ ] 恢复时日历事件映射重新建立或保持未同步状态；缺失壁纸资源只显示空背景，其他数据继续恢复。
 - [ ] 更新器默认检查正式版；Beta 开关关闭时忽略 prerelease，开启后只显示匹配的 prerelease。
 - [ ] 离线、无 Release、缺少更新 JSON、错误版本、错误 applicationId、外部主机 URL、无效 SHA-256 都显示可理解的失败信息。
@@ -61,4 +63,8 @@
 
 | 日期 | 设备 / API | 应用版本 | 范围 | 结果与缺陷编号 |
 | --- | --- | --- | --- | --- |
-|  |  |  |  | 未验收 |
+| 2026-09-27 | Windows AVD / API 26 | 未安装 | 尝试启动设备并运行迁移 instrumentation | 未验收：Android Emulator 37.1.11 默认 D3D11 后端触发 `StateManager11.cpp:1197` fatal assertion；官方 36.1.9 也未完成启动。强制 ANGLE OpenGL 后端虽绕过断言，但 ADB shell 仍无响应，未进入应用测试。 |
+| 2026-09-28 | Vivo V2352A / API 36，1260 × 2800 | 1.2.7 (34)，修复前 | 点击底部“设置”并采集崩溃栈 | 已复现 SET-001：设置页将 Adaptive Icon XML 传给 Compose `painterResource()` 导致闪退。修复后回归未验收：USB 覆盖安装被设备拒绝（`INSTALL_FAILED_ABORTED: User rejected permissions`）；未卸载应用或清除数据。 |
+| 2026-09-28 | Vivo V2352A / API 36，1260 × 2800 | Debug 1.2.7 (34) | 编译、统一导航定向单测与覆盖安装 | Kotlin 编译、Dock/Popup 定向单测 4/4、Debug APK 组装通过；覆盖安装被设备拒绝（`INSTALL_FAILED_ABORTED: User rejected permissions`），未进入页面回归。 |
+| 2026-09-29 | 未连接设备 | 1.2.8 (35) | 待办/日历/洞察代码修复、课程月视图、定向测试与 APK 打包 | Release Kotlin 编译与 12 项定向单测通过；Release 因缺少发布签名未能打包。GitHub Debug APK 已构建并验证包名/版本/Debug 签名，路径见 `app/build/outputs/apk/github/debug/`。实机布局和转场帧时仍未验收。 |
+| 2026-09-29 | SchedulePlus_API26_Clean / Android 8.0 API 26 AVD | Debug 1.0.1 (36) | 设置 → 版本、About 自适应图标、返回/重复进入、历史 Room 迁移 | 修复 SET-001：About 使用原生 Drawable 显示 Adaptive Icon，避免 Compose `painterResource()` 抛出 `IllegalArgumentException`。Dock 设置入口进入版本页、返回后再次进入均通过，无本应用 FATAL。Android instrumentation 27/27 通过，含 About Activity 重建与历史迁移夹具。正式 Release 仍因缺少原有签名配置而未打包；API 36 与实体 OEM 手机未验收。 |

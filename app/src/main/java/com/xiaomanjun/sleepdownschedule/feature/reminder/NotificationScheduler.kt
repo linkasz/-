@@ -6,6 +6,7 @@ import com.xiaomanjun.sleepdownschedule.*
 import com.xiaomanjun.sleepdownschedule.domain.schedule.courseReminderSessions
 import com.xiaomanjun.sleepdownschedule.feature.coloros.ColorOSCourseExperiment
 import com.xiaomanjun.sleepdownschedule.feature.experimental.XiaomiSuperIsland
+import com.xiaomanjun.sleepdownschedule.feature.experimental.VivoAtomicIsland
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -53,7 +54,7 @@ object NotificationScheduler {
     private const val KEY_DND_ENABLED_BY_APP = "dnd_enabled_by_app"
     private const val KEY_DND_RULE_ID = "dnd_rule_id"
     private const val KEY_DND_RULE_MIGRATED = "dnd_rule_migrated"
-    private const val DND_RULE_NAME = "SleepDown 课程勿扰"
+    private const val DND_RULE_NAME = "时序清单 课程勿扰"
     private const val LIVE_UPDATE_ID = 20260522
     private const val LIVE_UPDATE_ALTERNATE_ID = 20260523
     private const val SUPER_ISLAND_ID = 20260524
@@ -234,16 +235,13 @@ object NotificationScheduler {
                 }
             }
         }
-        val todoItems = (context.applicationContext as CourseScheduleApp).database.todoDao().getAllItems()
+        val todoItems = (context.applicationContext as CourseScheduleApp).database.todoDao().getActiveItems()
         todoItems.asSequence()
             .filter { !it.isCompleted && it.parentId == null && it.dueAt != null }
             .forEach { item ->
                 val dueAt = requireNotNull(item.dueAt)
                 val dueDateTime = java.time.Instant.ofEpochMilli(dueAt).atZone(scheduleZone)
-                val deadline = if (item.allDay) {
-                    dueDateTime.toLocalDate().atTime(9, 0).atZone(scheduleZone).toInstant().toEpochMilli()
-                } else dueAt
-                val trigger = deadline - config.notificationLeadMinutes.coerceAtLeast(0) * 60_000L
+                val trigger = com.xiaomanjun.sleepdownschedule.feature.todo.todoReminderAt(item, config.notificationLeadMinutes, scheduleZone) ?: return@forEach
                 if (trigger > now) {
                     val requestCode = eventRequestCode(
                         dueDateTime.toLocalDate(), item.id, 50, "todo:${item.id}:$dueAt"
@@ -255,6 +253,7 @@ object NotificationScheduler {
                             .setAction(ACTION_TODO_REMINDER)
                             .putExtra("todoId", item.id)
                             .putExtra("todoDueAt", dueAt)
+                            .putExtra("todoReminderSignature", com.xiaomanjun.sleepdownschedule.feature.todo.todoReminderSignature(item))
                             .putExtra("todoTitle", item.title)
                             .putExtra("todoDescription", item.description),
                         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
@@ -1134,7 +1133,7 @@ object NotificationScheduler {
                 .setTriggerDescription("由课程实时活动按钮控制")
                 .setIconResId(R.drawable.ic_moon_light)
                 .build()
-        ) ?: error("System did not create the SleepDown DND rule")
+        ) ?: error("系统未创建时序清单勿扰规则")
         prefs.edit { putString(KEY_DND_RULE_ID, ruleId) }
 
         val ruleConditionId = existingEntry?.second?.conditionId ?: conditionId
@@ -1189,10 +1188,24 @@ object NotificationScheduler {
         if (!payload.isPreview() && payload.kind == LiveUpdateKind.COURSE &&
             ColorOSCourseExperiment.suppressesPreClassLiveUpdate(context) &&
             payload.statusAt().phase == LiveUpdatePhase.BEFORE_CLASS) return
-        val notification = liveUpdateNotification(context, payload)
         // Submit while the event receiver still holds its wake lock. Delivery must not wait
         // for the FGS (or its optional minute loop) to be scheduled by an OEM background policy.
         if (!canPostNotifications(context)) return
+        if (VivoAtomicIsland.isAvailable(context) && payload.kind == LiveUpdateKind.COURSE) {
+            // vivo accepts this as one local notification, with no parallel ordinary reminder.
+            // Stop any previous standard-mode FGS without its stop action clearing the new island.
+            context.stopService(Intent(context, LiveUpdateForegroundService::class.java))
+            if (VivoAtomicIsland.post(context, payload, CHANNEL_ID)) {
+                context.getSystemService(NotificationManager::class.java)?.apply {
+                    cancel(LIVE_UPDATE_ID)
+                    cancel(LIVE_UPDATE_ALTERNATE_ID)
+                    cancel(SUPER_ISLAND_ID)
+                }
+                return
+            }
+        }
+        VivoAtomicIsland.end(context, CHANNEL_ID)
+        val notification = liveUpdateNotification(context, payload)
         if (XiaomiSuperIsland.isEnabled(context)) {
             // A foreground service immediately reposts the focus notification as ongoing and
             // prevents the Xiaomi float from appearing.
@@ -1254,6 +1267,7 @@ object NotificationScheduler {
     }
 
     internal fun cancelLiveUpdateNotifications(context: Context) = synchronized(liveUpdatePostLock) {
+        VivoAtomicIsland.end(context, CHANNEL_ID)
         XiaomiSuperIsland.clearPreview(context)
         val manager = NotificationManagerCompat.from(context)
         manager.cancel(LIVE_UPDATE_ID)

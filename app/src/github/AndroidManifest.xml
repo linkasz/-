@@ -2,10 +2,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <permission
-        android:name="com.xiaomanjun.sleepdownschedule.permission.COLOROS_COURSE_BRIDGE"
+        android:name="${applicationId}.permission.COLOROS_COURSE_BRIDGE"
         android:protectionLevel="signature" />
 
-    <uses-permission android:name="com.xiaomanjun.sleepdownschedule.permission.COLOROS_COURSE_BRIDGE" />
+    <uses-permission android:name="${applicationId}.permission.COLOROS_COURSE_BRIDGE" />
     <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
 
     <queries>
@@ -38,10 +38,10 @@
             android:exported="false" />
         <provider
             android:name=".feature.coloros.ColorOSCourseExportProvider"
-            android:authorities="com.xiaomanjun.sleepdownschedule.coloros.course"
+            android:authorities="${applicationId}.coloros.course"
             android:enabled="true"
             android:exported="true"
             android:grantUriPermissions="false"
-            android:readPermission="com.xiaomanjun.sleepdownschedule.permission.COLOROS_COURSE_BRIDGE" />
+            android:readPermission="${applicationId}.permission.COLOROS_COURSE_BRIDGE" />
     </application>
 </manifest>

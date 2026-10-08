@@ -1077,7 +1077,7 @@ fun SchedulePickerOverlay(
     if (showShareOptions) {
         LiquidAlertDialog(
             title = "分享课表",
-            message = "选择分享 SleepDown 课表口令，或导出可被日历应用识别的 ICS 文件。",
+            message = "选择分享 时序清单 课表口令，或导出可被日历应用识别的 ICS 文件。",
             actions = listOf(
                 LiquidAlertAction("分享课表口令", LiquidAlertActionStyle.Primary) {
                     showShareOptions = false

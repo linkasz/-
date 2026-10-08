@@ -82,7 +82,7 @@ open class AiImportHistoryDetailActivityHost : ComponentActivity() {
                                 AiImportHistoryRowContent(
                                     entry = it,
                                     modifier = Modifier.fillMaxSize(),
-                                    textColor = glassForegroundColor(settingsVisualConfig(state.config))
+                                    textColor = glassForegroundColor(state.config)
                                 )
                             }
                         }
@@ -99,7 +99,7 @@ open class AiImportHistoryDetailActivityHost : ComponentActivity() {
                             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 Text(
                                     "这条导入记录已不存在",
-                                    color = glassForegroundColor(settingsVisualConfig(state.config)).copy(alpha = 0.52f)
+                                    color = glassForegroundColor(state.config).copy(alpha = 0.52f)
                                 )
                             }
                         }

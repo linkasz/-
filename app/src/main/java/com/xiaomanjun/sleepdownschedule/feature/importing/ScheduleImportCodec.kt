@@ -90,7 +90,7 @@ JSON 协议如下：
 """.trimIndent()
 
     fun buildTokenPrompt(): String = """
-请读取我发给你的课表图片、PDF 或文字，并只输出 SleepDown 课程表口令，不要解释、不要 Markdown。
+请读取我发给你的课表图片、PDF 或文字，并只输出 时序清单 课程表口令，不要解释、不要 Markdown。
 口令格式：
 SDCT1
 T=总周数
@@ -384,7 +384,7 @@ object ScheduleImportParser {
     private fun parseSleepDownToken(input: String): ScheduleImportPayload {
         val lines = input.lines().map { it.trim() }.filter { it.isNotEmpty() }
         val startIndex = lines.indexOfFirst { it.contains("SDCT1") }
-        require(startIndex >= 0) { "未找到 SleepDown 课程表口令 SDCT1" }
+        require(startIndex >= 0) { "未找到 时序清单 课程表口令 SDCT1" }
         var totalWeeks = 20
         val periods = mutableListOf<PeriodPayload>()
         val courses = mutableListOf<ScheduleImportCourse>()

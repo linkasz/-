@@ -356,6 +356,7 @@ fun DetailScheduleMorphOverlay(
                 DetailActivityScaffold(
                     title = "课表详细设置",
                     config = detailState.config,
+                    useSettingsBackground = true,
                     onBack = {
                         exitUsesToolbarDuration = true
                         exitCommitRequest++

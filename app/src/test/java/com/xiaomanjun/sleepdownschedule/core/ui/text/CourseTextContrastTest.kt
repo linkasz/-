@@ -6,6 +6,21 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class CourseTextContrastTest {
+    @Test fun calendarInkChoosesBlackOnBrightAndWhiteOnDarkRegions() {
+        assertEquals(Color.Black, localMonochromeTextColor(floatArrayOf(.7f, .8f, .9f), Color.White, 1f))
+        assertEquals(Color.White, localMonochromeTextColor(floatArrayOf(.01f, .04f, .08f), Color.Black, 1f))
+    }
+
+    @Test fun calendarInkKeepsPolarityInsideHysteresisBand() {
+        assertEquals(Color.White, localMonochromeTextColor(floatArrayOf(.19f), Color.White, 1f))
+        assertEquals(Color.Black, localMonochromeTextColor(floatArrayOf(.19f), Color.Black, 1f))
+    }
+
+    @Test fun calendarInkPreservesDimmedAdjacentDateAlphaAndIgnoresInvalidSamples() {
+        assertEquals(Color.Black.copy(alpha = .45f), localMonochromeTextColor(floatArrayOf(.9f), Color.White, .45f))
+        assertEquals(Color.White, localMonochromeTextColor(floatArrayOf(Float.NaN, Float.POSITIVE_INFINITY), Color.White, 1f))
+    }
+
     private val blue = Color(0xFF64B5F6)
     private fun resolve(background: Float, seed: Color = blue, previous: Color = Color.Black) =
         courseTextColorForBackground(seed, FloatArray(35) { background }, previous)

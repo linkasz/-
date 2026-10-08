@@ -276,7 +276,7 @@ internal class OpenAiCompatibleChatProvider : AiScheduleImportProvider {
     private fun JsonArrayBuilder.scheduleParserSystemMessage() {
         add(buildJsonObject {
             put("role", JsonPrimitive("system"))
-            put("content", JsonPrimitive("你是 SleepDown Schedule 的课表解析器，只能输出完整 JSON，不要输出解释文字。若输出被截断，后续请求只续写剩余 JSON。"))
+            put("content", JsonPrimitive("你是 时序清单 的课表解析器，只能输出完整 JSON，不要输出解释文字。若输出被截断，后续请求只续写剩余 JSON。"))
         })
     }
 

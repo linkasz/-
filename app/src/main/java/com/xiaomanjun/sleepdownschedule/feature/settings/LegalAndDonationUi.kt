@@ -17,11 +17,11 @@ private data class PrivacyPolicySection(val title: String, val body: String)
 private val PrivacyPolicySections = listOf(
     PrivacyPolicySection(
         "一、应用与处理原则",
-        "课表+ 是基于 SleepDown 课程表修改的非官方版本。我们尽量在本机处理课程和待办数据，只在你主动使用相应功能时访问所需的系统服务或你配置的第三方服务。"
+        "时序清单用于管理课程、待办与日常安排。我们尽量在本机处理数据，只在你主动使用相应功能时访问所需的系统服务或你配置的第三方服务。"
     ),
     PrivacyPolicySection(
         "二、本机保存的数据",
-        "课程、待办事项、子任务、分组、提醒设置、壁纸取景和应用偏好保存在应用私有存储及本地 Room 数据库中。API Key 保存在应用私有偏好设置，不写入 .sleepdown 备份。卸载应用或清除数据可能删除本机内容；重要数据请定期导出备份。"
+        "课程、待办事项、子任务、分组、提醒设置、壁纸取景和应用偏好保存在应用私有存储及本地 Room 数据库中。API Key 保存在应用私有偏好设置，不写入 .shixu 备份。卸载应用或清除数据可能删除本机内容；重要数据请定期导出备份。"
     ),
     PrivacyPolicySection(
         "三、AI 任务提取",
@@ -37,7 +37,7 @@ private val PrivacyPolicySections = listOf(
     ),
     PrivacyPolicySection(
         "六、备份与数据控制",
-        "你可以在应用内创建或恢复 .sleepdown 备份。备份文件由你选择保存位置并自行保管；通过系统分享或模型 API 发送的内容由相应接收方处理。你可以编辑或删除本机保存的数据，也可以在系统设置中撤回可选权限。"
+        "你可以在应用内创建或恢复 .shixu 备份。备份文件由你选择保存位置并自行保管；通过系统分享或模型 API 发送的内容由相应接收方处理。你可以编辑或删除本机保存的数据，也可以在系统设置中撤回可选权限。"
     )
 )
 
@@ -51,7 +51,7 @@ fun PrivacyPolicySettingsScreen(state: AppState, backdrop: Backdrop?) {
         item {
             SettingsGroup(backdrop = backdrop, config = state.config, modifier = Modifier.fillMaxWidth()) {
                 SettingsInfoRow(
-                    "课表+ 隐私说明",
+                    "时序清单隐私说明",
                     "课程与待办默认留在本机。仅当你主动使用 AI 提取、系统分享或日历同步时，相关数据才会按该功能说明交给你选择的服务。"
                 )
             }

@@ -364,8 +364,8 @@ fun ScheduleSettingsContent(
                         SettingsInfoRow(
                             title = if (experimentalNotifications.superIslandEnabled) "设置超级岛" else "设置实时活动",
                             body = if (experimentalNotifications.superIslandEnabled)
-                                "请在系统中允许 SleepDown 显示通知。"
-                            else "请在系统中允许 SleepDown 显示通知和实时活动。"
+                                "请在系统中允许 时序清单 显示通知。"
+                            else "请在系统中允许 时序清单 显示通知和实时活动。"
                         )
                         SettingsDivider()
                         Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {

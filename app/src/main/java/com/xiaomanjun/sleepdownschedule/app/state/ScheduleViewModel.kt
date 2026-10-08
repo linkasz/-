@@ -202,11 +202,17 @@ class ScheduleViewModel(
     fun executeAgentPlan(
         actions: List<AgentValidatedAction>,
         onResult: (AgentPlanExecutionResult) -> Unit = {}
-    ) = viewModelScope.launch {
-        val result = repository.executeAgentPlan(AgentPlan(actions))
-        if (result.success) refreshCoordinator.request()
-        snackbar.value = result.message
-        onResult(result)
+    ) = (app as CourseScheduleApp).applicationScope.launch(Dispatchers.Main.immediate) {
+        try {
+            val result = repository.executeAgentPlan(AgentPlan(actions))
+            if (result.success) refreshCoordinator.request()
+            snackbar.value = result.message
+            onResult(result)
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (error: Exception) {
+            Log.w("ShixuAgent", "Confirmed course save failed: ${error.javaClass.simpleName}")
+            onResult(AgentPlanExecutionResult(false, null, false, "保存未完成，请重试"))
+        }
     }
 
     fun executeAgentSettingPlan(
@@ -721,7 +727,7 @@ class ScheduleViewModel(
     }
 
     fun createScheduleFromAgent(name: String, onResult: (AgentPlanExecutionResult) -> Unit) =
-        viewModelScope.launch {
+        (app as CourseScheduleApp).applicationScope.launch(Dispatchers.Main.immediate) {
             val error = runCatching {
                 val createdId = repository.createSchedule(name)
                 check(repository.snapshot().schedules.any { it.id == createdId && it.name == name.trim().take(30) }) {
@@ -729,6 +735,7 @@ class ScheduleViewModel(
                 }
                 refreshCoordinator.request()
             }.exceptionOrNull()
+            if (error is CancellationException) throw error
             onResult(
                 AgentPlanExecutionResult(
                     success = error == null,

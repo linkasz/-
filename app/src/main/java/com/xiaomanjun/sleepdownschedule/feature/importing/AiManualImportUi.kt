@@ -524,8 +524,8 @@ fun NormalizedAiManualImportScreen(
             onConfirm = {
                 routeMessage = "正在使用 ${settings.profile.displayName} 整理课表口令..."
                 val repairInput = buildString {
-                    appendLine("下面是一个格式不完整或不规范的 SleepDown 课程表口令。")
-                    appendLine("请理解其中的课程信息，严格按照 SleepDown 课表导入协议整理并只返回可导入结果。")
+                    appendLine("下面是一个格式不完整或不规范的 时序清单 课程表口令。")
+                    appendLine("请理解其中的课程信息，严格按照 时序清单 课表导入协议整理并只返回可导入结果。")
                     appendLine()
                     append(jsonText)
                 }
@@ -567,7 +567,7 @@ fun NormalizedAiManualImportScreen(
         onJsonTextChange = { jsonText = it },
         onCopyPrompt = {
             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            clipboard.setPrimaryClip(ClipData.newPlainText("SleepDown 课表口令提示词", SchedulePromptBuilder.buildTokenPrompt()))
+            clipboard.setPrimaryClip(ClipData.newPlainText("时序清单 课表口令提示词", SchedulePromptBuilder.buildTokenPrompt()))
         },
         onCleanText = { jsonText = ScheduleImportParser.cleanMarkdown(jsonText) },
         selectedFileName = selectedFileName,
@@ -859,7 +859,7 @@ private fun AiManualImportDialogContent(
                     DialogCapsuleField(
                         value = jsonText,
                         onValueChange = onJsonTextChange,
-                        placeholder = "粘贴 SleepDown / WakeUp / 星链口令或 AI 返回内容",
+                        placeholder = "粘贴 时序清单 / WakeUp / 星链口令或 AI 返回内容",
                         config = state.config,
                         minLines = 5,
                         cornerRadius = 16.dp,

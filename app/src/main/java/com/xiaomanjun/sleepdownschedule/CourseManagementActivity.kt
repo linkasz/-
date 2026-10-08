@@ -153,7 +153,7 @@ open class CourseManagementActivity : ComponentActivity() {
             val state = stableCourseManagementState(liveState, initialState)
             CourseScheduleTheme(config = state.config) {
                 CourseManagementColorProvider(state) {
-                    GlassMiuixSettingsTheme(settingsVisualConfig(state.config)) {
+                    GlassMiuixSettingsTheme(state.config) {
                         Box(Modifier.fillMaxSize()) {
                             CrossActivityTransitionHost(
                                 activity = this@CourseManagementActivity,

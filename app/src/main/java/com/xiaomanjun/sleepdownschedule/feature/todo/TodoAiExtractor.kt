@@ -18,7 +18,8 @@ data class TodoAiConfig(
     val apiUrl: String = TodoAiExtractor.DEFAULT_URL,
     val apiKey: String = "",
     val textModel: String = "glm-4-flash",
-    val visionModel: String = "glm-4v-flash"
+    val visionModel: String = "glm-4v-flash",
+    val credentialError: String? = null
 )
 
 data class TodoExtraction(
@@ -34,29 +35,56 @@ data class TodoExtraction(
 class TodoAiExtractor @Inject constructor(@ApplicationContext private val context: Context) {
     fun readConfig(): TodoAiConfig {
         val p = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
+        // Upgrade the legacy plaintext credential only after the encrypted value is committed.
+        val legacy = p.getString(KEY_KEY, "").orEmpty()
+        var credentialError: String? = null
+        if (!p.contains(KEY_ENCRYPTED_KEY) && legacy.isNotBlank()) {
+            try {
+                val encrypted = com.xiaomanjun.sleepdownschedule.feature.importing.AiImportSettingsStore.encrypt(context, legacy)
+                check(p.edit().putString(KEY_ENCRYPTED_KEY, encrypted).remove(KEY_KEY).commit())
+            } catch (_: Exception) {
+                credentialError = "待办 AI 凭据加密升级失败，原配置已保留，请重新配置"
+            }
+        }
+        val encryptedKey = p.getString(KEY_ENCRYPTED_KEY, "").orEmpty()
+        val apiKey = try {
+            com.xiaomanjun.sleepdownschedule.feature.importing.AiImportSettingsStore.decrypt(context, encryptedKey)
+        } catch (_: Exception) {
+            credentialError = "待办 AI 凭据无法解密，原配置已保留，请重新配置"
+            ""
+        }
+        if (encryptedKey.isNotBlank() && apiKey.isBlank()) {
+            credentialError = "待办 AI 凭据无法解密，原配置已保留，请重新配置"
+        }
         return TodoAiConfig(
             apiUrl = p.getString(KEY_URL, DEFAULT_URL).orEmpty(),
-            apiKey = p.getString(KEY_KEY, "").orEmpty(),
+            apiKey = apiKey,
             textModel = p.getString(KEY_TEXT_MODEL, "glm-4-flash").orEmpty(),
-            visionModel = p.getString(KEY_VISION_MODEL, "glm-4v-flash").orEmpty()
+            visionModel = p.getString(KEY_VISION_MODEL, "glm-4v-flash").orEmpty(),
+            credentialError = credentialError
         )
     }
 
     fun saveConfig(config: TodoAiConfig) {
-        require(config.apiUrl.startsWith("https://") || config.apiUrl.startsWith("http://")) {
-            "API 地址必须以 http:// 或 https:// 开头"
+        val apiUrl = runCatching { URL(config.apiUrl.trim()) }.getOrNull()
+        require(apiUrl != null && apiUrl.protocol in setOf("https", "http") && apiUrl.host.isNotBlank()) {
+            "请填写有效的 http:// 或 https:// API 地址"
         }
-        context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE).edit()
+        require(config.credentialError == null || config.apiKey.isNotBlank()) { "请重新填写 API Key，原配置将保留到保存成功" }
+        val encrypted = com.xiaomanjun.sleepdownschedule.feature.importing.AiImportSettingsStore.encrypt(context, config.apiKey)
+        check(context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE).edit()
             .putString(KEY_URL, config.apiUrl.trim())
-            .putString(KEY_KEY, config.apiKey)
+            .putString(KEY_ENCRYPTED_KEY, encrypted)
+            .remove(KEY_KEY)
             .putString(KEY_TEXT_MODEL, config.textModel.trim().ifBlank { "glm-4-flash" })
             .putString(KEY_VISION_MODEL, config.visionModel.trim().ifBlank { "glm-4v-flash" })
-            .apply()
+            .commit()) { "保存待办 AI 配置失败，请重试" }
     }
 
     suspend fun extract(text: String, images: List<Uri>): TodoExtraction =
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             val config = readConfig()
+            check(config.credentialError == null) { config.credentialError.orEmpty() }
             require(config.apiKey.isNotBlank()) { "请先在 AI 设置中填写 API Key" }
             require(text.isNotBlank() || images.isNotEmpty()) { "先输入文字或选择图片" }
             require(text.length <= MAX_TEXT_CHARS) { "文本不能超过 ${MAX_TEXT_CHARS} 个字符" }
@@ -166,6 +194,7 @@ class TodoAiExtractor @Inject constructor(@ApplicationContext private val contex
         private const val PREFERENCES = "schedule_plus_ai"
         private const val KEY_URL = "api_url"
         private const val KEY_KEY = "api_key"
+        private const val KEY_ENCRYPTED_KEY = "api_key_encrypted"
         private const val KEY_TEXT_MODEL = "text_model"
         private const val KEY_VISION_MODEL = "vision_model"
         private const val MAX_TEXT_CHARS = 40_000

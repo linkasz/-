@@ -17,6 +17,7 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
@@ -40,9 +41,11 @@ import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import com.xiaomanjun.sleepdownschedule.core.ui.text.LocalCourseTextBackground
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -55,6 +58,7 @@ import androidx.compose.ui.graphics.addOutline
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
@@ -285,7 +289,9 @@ fun buildCourseCardColorAssignments(
         // prevent large schedules from exhausting otherwise-identical candidates.
         floatArrayOf(0f, -1f, 1f, -2f, 2f)
     } else {
-        floatArrayOf(0f, -9f, 9f, -18f, 18f, -28f, 28f)
+        // Similar sampled wallpaper colors still need enough nearby hues to distinguish a full
+        // schedule; expanding the candidate arc gives the max-min allocator real alternatives.
+        floatArrayOf(0f, -12f, 12f, -24f, 24f, -36f, 36f, -48f, 48f)
     }
     val saturationSteps = if (tonalFamily) {
         floatArrayOf(0f, -0.18f, 0.16f, -0.28f, 0.24f)
@@ -416,9 +422,12 @@ fun buildCourseCardColorAssignments(
         val selectedIndex = if (assignedByKey.isEmpty()) {
             preferred
         } else {
-            available.indices.maxByOrNull { candidateIndex ->
+            available.indices.maxWithOrNull(compareBy<Int> { candidateIndex ->
                 val candidate = available[candidateIndex]
                 val separation = assignedByKey.values.minOf { courseCardPerceptualDistance(it, candidate) }
+                separation
+            }.thenBy { candidateIndex ->
+                val candidate = available[candidateIndex]
                 val adjacentAssigned = adjacentKeys[key].orEmpty().mapNotNull(assignedByKey::get)
                 val adjacentAppearance = adjacentAssigned.minOfOrNull { courseCardAppearanceDistance(it, candidate) } ?: 1.0
                 val sameFamilyPenalty = adjacentAssigned.count { neighbor ->
@@ -429,9 +438,9 @@ fun buildCourseCardColorAssignments(
                         kotlin.math.abs(a.value - b.value) < 0.12f
                 }
                 val preferenceDistance = kotlin.math.abs(candidateIndex - preferred).toDouble() / available.size
-                separation + adjacentAppearance * 0.18 - sameFamilyPenalty * 0.20 -
-                    preferenceDistance * 0.004 - index * 0.0000001
-            } ?: 0
+                adjacentAppearance - sameFamilyPenalty * 0.20 - preferenceDistance * 0.004 -
+                    index * 0.0000001
+            }) ?: 0
         }
         assignedByKey[key] = available.removeAt(selectedIndex)
     }
@@ -517,8 +526,10 @@ fun appUsesDarkTheme(config: ScheduleConfigEntity): Boolean {
 @Composable
 fun glassUsesLightStyle(config: ScheduleConfigEntity): Boolean {
     if (config.wallpaperUri.isNullOrBlank()) return !appUsesDarkTheme(config)
+    val wallpaperBrightness = LocalPersonalizationPreview.current?.wallpaperBrightness
+        ?: config.wallpaperBrightness
     return when {
-        config.wallpaperBrightness < 0.72f -> false
+        wallpaperBrightness < 0.72f -> false
         config.homeTextLight -> false
         else -> true
     }
@@ -534,6 +545,7 @@ fun GlassSurface(
     selected: Boolean = false,
     onClick: (() -> Unit)? = null,
     baseSurfaceColorOverride: Color? = null,
+    selectedSurfaceColorOverride: Color? = null,
     domain: GlassBackdropDomain = GlassBackdropDomain.ChromeCombined,
     debugLabel: String = "GlassSurface",
     bottomLitTint: Boolean = false,
@@ -541,30 +553,37 @@ fun GlassSurface(
     shapeProvider: (() -> Shape)? = null,
     morphAllocation: com.xiaomanjun.sleepdownschedule.glass.GlassMorphAllocation? = null,
     placementLayer: Boolean = true,
+    selectionProgress: Float? = null,
+    onLongClick: (() -> Unit)? = null,
+    restingDecorations: Boolean = false,
     content: @Composable () -> Unit
 ) {
-    val glassBackdrop = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) backdrop else null
+    // The modal shell owns glass; sampling its page again inside buttons produces ghost text.
+    val readablePanel = LocalReadablePanelControls.current
+    val glassBackdrop = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !readablePanel) backdrop else null
     val useGlass = glassBackdrop != null
     val quality = LocalGlassQuality.current
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
     val pressProgress by animateFloatAsState(if (pressed) 1f else 0f, label = "glass-press")
-    val lightGlass = glassUsesLightStyle(config)
+    val selectedProgress = selectionProgress?.coerceIn(0f, 1f) ?: if (selected) 1f else 0f
+    val lightGlass = if (readablePanel) !appUsesDarkTheme(config) else glassUsesLightStyle(config)
     val hasWallpaper = config.hasAnyWallpaper()
-    val base = baseSurfaceColorOverride ?: if (lightGlass) Color.White else Color(0xFF050505)
-    val selectedColor = if (useGlass) {
+    val base = baseSurfaceColorOverride ?: if (readablePanel) {
+        if (lightGlass) Color(0xFFF0F2F6) else Color(0xFF303238)
+    } else if (lightGlass) Color.White else Color(0xFF050505)
+    val selectedColor = selectedSurfaceColorOverride ?: if (useGlass) {
         if (lightGlass) Color.Black.copy(alpha = 0.07f) else Color.White.copy(alpha = 0.08f)
     } else {
         MaterialTheme.colorScheme.primaryContainer
     }
     val clearAlpha = tokens.surfaceAlpha * quality
-    val surfaceColor = if (selected) selectedColor else base.copy(alpha = clearAlpha)
-    val restHighlightAlpha = if (hasWallpaper) 0f else tokens.highlightAlpha * 0.72f
-    val highlightAlpha = if (selected) {
-        tokens.highlightAlpha + 0.10f * pressProgress
-    } else {
-        restHighlightAlpha + tokens.highlightAlpha * 0.65f * pressProgress
-    }
+    val surfaceColor = lerp(base.copy(alpha = clearAlpha), selectedColor, selectedProgress)
+    val restHighlightAlpha = if (restingDecorations) tokens.highlightAlpha
+        else if (hasWallpaper) 0f else tokens.highlightAlpha * 0.72f
+    val highlightAlpha = restHighlightAlpha +
+        (tokens.highlightAlpha - restHighlightAlpha) * selectedProgress +
+        (tokens.highlightAlpha * 0.65f * (1f - selectedProgress) + 0.10f * selectedProgress) * pressProgress
     val descriptor = rememberGlassSurfaceDescriptor(
         debugLabel = debugLabel,
         domain = domain,
@@ -585,18 +604,14 @@ fun GlassSurface(
             },
             alpha = highlightAlpha
         ),
-        shadowAlpha = if (selected) {
-            tokens.shadowAlpha + 0.12f * pressProgress
-        } else {
-            tokens.shadowAlpha * pressProgress
-        },
+        shadowAlpha = if (restingDecorations) tokens.shadowAlpha * (1f + .3f * pressProgress)
+            else tokens.shadowAlpha * pressProgress +
+            (tokens.shadowAlpha + 0.12f * pressProgress - tokens.shadowAlpha * pressProgress) * selectedProgress,
         innerShadow = GlassInnerShadowFrame(
-            radius = if (selected) 6.dp else 3.dp * pressProgress,
-            alpha = if (selected) {
-                tokens.innerShadowAlpha + 0.10f * pressProgress
-            } else {
-                tokens.innerShadowAlpha * pressProgress
-            }
+            radius = ((if (restingDecorations) 4f else 0f) + 3f * pressProgress + (6f - 3f * pressProgress) * selectedProgress).dp,
+            alpha = (if (restingDecorations) tokens.innerShadowAlpha else 0f) + tokens.innerShadowAlpha * pressProgress +
+                0.10f * pressProgress * selectedProgress +
+                tokens.innerShadowAlpha * selectedProgress * (1f - pressProgress)
         ),
         // Passive glass never receives press events. An identity graphics layer here can
         // retain the previous pixels of a badge while its parent pager layer moves.
@@ -640,12 +655,25 @@ fun GlassSurface(
             }
     }
         .then(
-            if (onClick == null) Modifier else Modifier.clickable(
-                interactionSource = interactionSource,
-                indication = null,
-                role = Role.Button,
-                onClick = onClick
-            )
+            when {
+                onClick != null && onLongClick != null -> Modifier.combinedClickable(
+                    interactionSource = interactionSource,
+                    indication = null,
+                    role = Role.Button,
+                    onClick = onClick,
+                    onLongClick = onLongClick
+                )
+                onClick != null -> Modifier.clickable(
+                    interactionSource = interactionSource,
+                    indication = null,
+                    role = Role.Button,
+                    onClick = onClick
+                )
+                onLongClick != null -> Modifier.pointerInput(onLongClick) {
+                    detectTapGestures(onLongPress = { onLongClick() })
+                }
+                else -> Modifier
+            }
         )
 
     Box(modifier = contentModifier) {
@@ -660,6 +688,9 @@ fun GlassPill(
     modifier: Modifier = Modifier,
     selected: Boolean = false,
     onClick: (() -> Unit)? = null,
+    selectionProgress: Float? = null,
+    onLongClick: (() -> Unit)? = null,
+    selectedSurfaceColorOverride: Color? = null,
     content: @Composable () -> Unit
 ) {
     GlassSurface(
@@ -669,8 +700,11 @@ fun GlassPill(
         shape = Capsule(),
         tokens = GlassTokens.pill(),
         selected = selected,
+        selectionProgress = selectionProgress,
         onClick = onClick,
+        onLongClick = onLongClick,
         debugLabel = "GlassPill",
+        selectedSurfaceColorOverride = selectedSurfaceColorOverride,
         content = content
     )
 }
@@ -1041,6 +1075,8 @@ fun CourseGlassCard(
     morphAllocation: com.xiaomanjun.sleepdownschedule.glass.GlassMorphAllocation? = null,
     surfaceBackdrop: LayerBackdrop? = null,
     onClick: (() -> Unit)? = null,
+    baseColorOverride: Color? = null,
+    neutralContainer: Boolean = false,
     content: @Composable () -> Unit
 ) {
     val occlusionPhase = LocalCourseGlassOcclusionPhase.current
@@ -1056,23 +1092,27 @@ fun CourseGlassCard(
     val previewState = LocalPersonalizationPreview.current
     val glassBackdrop = if (
         config.courseCardGlassEnabled &&
-        config.hasAnyWallpaper() &&
+        (config.hasAnyWallpaper() || neutralContainer) &&
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
     ) backdrop else null
     val simpleBlurBackdrop = if (
         !config.courseCardGlassEnabled &&
         config.courseCardGaussianBlurEnabled &&
-        config.hasAnyWallpaper() &&
+        (config.hasAnyWallpaper() || neutralContainer) &&
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
     ) backdrop else null
     val useGlass = glassBackdrop != null
     val quality = LocalGlassQuality.current
     val clickInteractionSource = remember { MutableInteractionSource() }
     var pressed by remember { mutableStateOf(false) }
-    val baseColor = if (muted) MutedCourseLightColor else courseCardBaseColor(config, course)
-    val hasWallpaper = config.hasAnyWallpaper()
-    val tokens = GlassTokens.courseCard(blurOverride ?: config.courseCardBlur)
     val lightGlass = glassUsesLightStyle(config)
+    val baseColor = if (neutralContainer) {
+        if (lightGlass) Color.White else Color(0xFF202124)
+    } else if (muted) MutedCourseLightColor
+        else baseColorOverride ?: courseCardBaseColor(config, course)
+    val hasWallpaper = config.hasAnyWallpaper()
+    val liveWallpaperBrightness = previewState?.wallpaperBrightness ?: config.wallpaperBrightness
+    val tokens = GlassTokens.courseCard(blurOverride ?: config.courseCardBlur)
     val liveLiquidBlur = blurOverride ?: previewState?.cardBlur ?: config.courseCardBlur
     val liveRefractionStrength = previewState?.cardRefractionStrength
         ?: config.courseCardRefractionStrength
@@ -1108,7 +1148,7 @@ fun CourseGlassCard(
     val liveCardAlpha = (previewState?.cardAlpha ?: config.cardAlpha).coerceIn(0f, 1f)
     val textSurfaceAlpha = when {
         useGlass -> courseGlassTintAlpha(if (outlineLightEnabled) 0.75f else liveCardAlpha, quality, hasWallpaper) *
-            courseCardBrightnessAttenuation(config.wallpaperBrightness, outlineLightEnabled)
+            courseCardBrightnessAttenuation(liveWallpaperBrightness, outlineLightEnabled)
         simpleBlurBackdrop != null -> courseSimpleBlurTintAlpha(liveCardAlpha, quality, hasWallpaper)
         !config.courseCardGlassEnabled && !config.courseCardGaussianBlurEnabled ->
             liveCardAlpha.coerceAtLeast(if (hasWallpaper) 0.35f else 0.92f)
@@ -1164,7 +1204,7 @@ fun CourseGlassCard(
     val liquidSurfaceDraw: DrawScope.() -> Unit = {
         val liveAlpha = previewState?.cardAlpha ?: config.cardAlpha
         val brightnessAttenuation = courseCardBrightnessAttenuation(
-            config.wallpaperBrightness,
+            liveWallpaperBrightness,
             outlineLightEnabled
         )
         val tintStrength = if (outlineLightEnabled) 0.75f else liveAlpha
@@ -1189,7 +1229,12 @@ fun CourseGlassCard(
     } else {
         Modifier
     }
-    val cardModifier = modifier.onGloballyPositioned {
+    val cardModifier = modifier.then(
+        if (neutralContainer && renderSurface) Modifier
+            .shadow(2.dp, shape, clip = false)
+            .border(0.5.dp, if (lightGlass) Color.Black.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.14f), shape)
+        else Modifier
+    ).onGloballyPositioned {
         textCardCoordinates[0] = it
         textCardReady = true
     }
@@ -1348,9 +1393,9 @@ fun CourseGlassCard(
                     accentColor = baseColor,
                     shape = shape,
                     lightGlass = lightGlass,
-                    intensity = (previewState?.cardAlpha ?: config.cardAlpha) *
+                        intensity = (previewState?.cardAlpha ?: config.cardAlpha) *
                         courseCardBrightnessAttenuation(
-                            config.wallpaperBrightness,
+                            liveWallpaperBrightness,
                             outlineLightEnabled = true
                         ),
                     expanded = expandedOutlineLight,

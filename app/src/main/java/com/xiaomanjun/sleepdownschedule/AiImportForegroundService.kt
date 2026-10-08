@@ -189,7 +189,7 @@ class AiImportForegroundService : Service() {
         ): Notification {
             val builder = Notification.Builder(context, RUNNING_CHANNEL_ID)
                 .applyAppNotificationIcon(context)
-                .setContentTitle("SleepDown · AI 导入")
+                .setContentTitle("时序清单 · AI 导入")
                 .setContentText(status.ifBlank { "正在整理输入" })
                 .setContentIntent(progressPendingIntent(context, taskId, 8401))
                 .setOngoing(true)

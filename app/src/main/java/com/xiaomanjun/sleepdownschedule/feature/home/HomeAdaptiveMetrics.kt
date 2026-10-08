@@ -386,6 +386,8 @@ internal fun adaptiveWeekCardCornerRadius(
     }
     // 大屏（宽窗口）在滑块基础上再扩大一截曲率，短卡仍保持不塌成胶囊
     val tabletBoost = if (shortWindowEdge >= 600f) 3f else 0f
-    val scaledRadius = (radius + tabletBoost).coerceAtMost(shortCardEdge * 0.34f)
+    val cardBound = shortCardEdge * 0.34f
+    val windowBound = if (shortWindowEdge >= 600f) 16f else cardBound
+    val scaledRadius = (radius + tabletBoost).coerceAtMost(min(cardBound, windowBound))
     return scaledRadius.dp
 }

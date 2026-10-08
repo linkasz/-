@@ -3,6 +3,7 @@ package com.xiaomanjun.sleepdownschedule.feature.home.day
 import com.xiaomanjun.sleepdownschedule.feature.agent.excludeHomeAssistantPull
 
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import com.xiaomanjun.sleepdownschedule.core.ui.text.CourseCardText
 import com.xiaomanjun.sleepdownschedule.core.ui.text.courseTextColorForPage
@@ -24,7 +25,6 @@ import com.xiaomanjun.sleepdownschedule.feature.home.overlay.courseRemovalMotion
 import com.xiaomanjun.sleepdownschedule.core.performance.*
 import com.xiaomanjun.sleepdownschedule.core.wallpaper.*
 import com.xiaomanjun.sleepdownschedule.feature.course.editor.*
-import com.xiaomanjun.sleepdownschedule.feature.todo.TodoActivity
 import com.xiaomanjun.sleepdownschedule.feature.todo.TodoItemEntity
 
 import com.xiaomanjun.sleepdownschedule.feature.agent.*
@@ -192,6 +192,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.darkColorScheme
@@ -585,13 +587,13 @@ fun HomeModeSwitch(backdrop: Backdrop?, config: ScheduleConfigEntity, mode: Home
         Box(
             modifier = Modifier
                 .padding(end = 12.dp)
-                .width(108.dp)
+                .width(160.dp)
                 .height(44.dp),
             contentAlignment = Alignment.Center
         ) {
             Box(
                 modifier = Modifier
-                    .requiredSize(width = 116.dp, height = 52.dp),
+                    .requiredSize(width = 168.dp, height = 52.dp),
                 contentAlignment = Alignment.Center
             ) {
                 LiquidBottomTabs(
@@ -599,7 +601,7 @@ fun HomeModeSwitch(backdrop: Backdrop?, config: ScheduleConfigEntity, mode: Home
                     onTabSelected = { index -> HomeMode.entries.getOrNull(index)?.let(onModeChange) },
                     backdrop = backdrop,
                     tabsCount = 2,
-                    modifier = Modifier.size(width = 108.dp, height = 44.dp),
+                    modifier = Modifier.size(width = 160.dp, height = 44.dp),
                     containerHeight = 44.dp,
                     indicatorHeight = 36.dp,
                     horizontalPadding = 4.dp,
@@ -640,16 +642,16 @@ fun HomeModeSwitch(backdrop: Backdrop?, config: ScheduleConfigEntity, mode: Home
         }
     } else {
         GlassPill(backdrop = null, config = config, modifier = Modifier.padding(end = 12.dp).height(44.dp).padding(4.dp)) {
-            Row(Modifier.width(104.dp).height(36.dp), verticalAlignment = Alignment.CenterVertically) {
-                HomeModePill(null, config, R.drawable.ic_day_view, "\u65E5") { onModeChange(HomeMode.Day) }
-                HomeModePill(null, config, R.drawable.ic_week_view, "\u5468") { onModeChange(HomeMode.Week) }
+            Row(Modifier.width(156.dp).height(36.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                HomeModePill(null, config, R.drawable.ic_day_view, "\u65E5", width = 76.dp) { onModeChange(HomeMode.Day) }
+                HomeModePill(null, config, R.drawable.ic_week_view, "\u5468", width = 76.dp) { onModeChange(HomeMode.Week) }
             }
         }
     }
 }
 
 @Composable
-fun HomeModePill(backdrop: Backdrop?, config: ScheduleConfigEntity, iconRes: Int, label: String, onClick: () -> Unit) {
+fun HomeModePill(backdrop: Backdrop?, config: ScheduleConfigEntity, iconRes: Int?, label: String, width: Dp = 52.dp, onClick: () -> Unit) {
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
     Box(
@@ -657,7 +659,7 @@ fun HomeModePill(backdrop: Backdrop?, config: ScheduleConfigEntity, iconRes: Int
             .clip(Capsule())
             .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
             .height(34.dp)
-            .width(52.dp),
+            .width(width),
         contentAlignment = Alignment.Center
     ) {
         if (pressed) {
@@ -672,7 +674,8 @@ fun HomeModePill(backdrop: Backdrop?, config: ScheduleConfigEntity, iconRes: Int
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally)
         ) {
-            Icon(painterResource(iconRes), contentDescription = null, modifier = Modifier.size(16.dp))
+            if (iconRes == null) Icon(Icons.Default.CalendarMonth, contentDescription = null, modifier = Modifier.size(16.dp))
+            else Icon(painterResource(iconRes), contentDescription = null, modifier = Modifier.size(16.dp))
             Text(label, style = MaterialTheme.typography.labelLarge)
         }
     }
@@ -707,6 +710,7 @@ internal fun HomeScreen(
     onAgentPrepareOpen: suspend () -> Unit = {},
     onAgentDismissed: () -> Unit = {},
     onCourseClick: (CourseEntity, Int, Rect?) -> Unit,
+    onOpenTodos: () -> Unit = {},
     onAddCourse: (CourseEntity) -> Unit = {},
     onAgentAction: AgentActionHandler = { _, _ -> },
     onUpdateCourseSingleWeek: (CourseEntity, CourseEntity, Int) -> Unit = { _, _, _ -> },
@@ -718,7 +722,7 @@ internal fun HomeScreen(
     weekEditInteractionEnabled: Boolean = true,
     courseGlassOcclusionPhase: CourseGlassOcclusionPhase = CourseGlassOcclusionPhase.Live,
     courseGlassRestoredGroupKeys: Set<String> = emptySet(),
-    modeMotion: HomeSwitchMotion = rememberHomeSwitchMotion(mode == HomeMode.Week, "home-mode"),
+    modeMotion: HomeSwitchMotion = rememberHomeSwitchMotion(mode != HomeMode.Day, "home-mode"),
 ) {
     val modeStateHolder = rememberSaveableStateHolder()
     val homeOverscrollFactory = rememberHapticMiuixOverscrollFactory()
@@ -727,7 +731,10 @@ internal fun HomeScreen(
     }
     val textColor = homeForegroundColor(state.config)
     var weekEditMode by remember(state.config.id) { mutableStateOf(false) }
-    LaunchedEffect(mode) { if (mode != HomeMode.Week) weekEditMode = false }
+    LaunchedEffect(mode) {
+        if (mode != HomeMode.Week) weekEditMode = false
+        onContentUnderTopBarChange(false)
+    }
     val homeAssistant = com.xiaomanjun.sleepdownschedule.feature.agent.LocalHomeAssistant.current
     SideEffect { homeAssistant?.editing = weekEditMode }
     DisposableEffect(homeAssistant) { onDispose { homeAssistant?.editing = false } }
@@ -783,34 +790,34 @@ internal fun HomeScreen(
         BackHandler(enabled = LocalHomePaneVisible.current && mode == HomeMode.Week && weekEditMode) {
             weekEditMode = false
         }
-        HomeMode.entries.forEach { targetMode ->
-            key(targetMode) {
-            HomeSwitchPane(
-                motion = modeMotion,
-                secondary = targetMode == HomeMode.Week,
-                retainContent = true,
-                modifier = Modifier.fillMaxSize()
-            ) {
-            modeStateHolder.SaveableStateProvider(targetMode.name) {
-            when (targetMode) {
-                HomeMode.Day -> CompositionLocalProvider(
+        HomeSwitchPane(
+            motion = modeMotion,
+            secondary = false,
+            retainContent = true,
+            modifier = Modifier.fillMaxSize()
+        ) {
+            modeStateHolder.SaveableStateProvider(HomeMode.Day.name) {
+                CompositionLocalProvider(
                     LocalOverscrollFactory provides homeOverscrollFactory,
                     LocalPersonalizationPreview provides personalizationPreviewState
                 ) {
                     DayScheduleScreen(
                         state = state,
                         todoItems = todoItems,
+                        onOpenTodos = onOpenTodos,
                         agentState = agentState,
                         adaptiveMetrics = adaptiveMetrics,
                         displayDate = displayDate,
-                        displayWeek = effectiveCurrentWeek(state.config, displayDate),
+                        displayWeek = com.xiaomanjun.sleepdownschedule.domain.schedule.adjustedTeachingWeekForDate(
+                            state.config, displayDate
+                        ) ?: effectiveCurrentWeek(state.config, displayDate),
                         displayDayCount = if (dayViewMode == DayViewMode.TWO_DAY) 2 else 1,
                         cardColor = cardColor,
                         textColor = textColor,
                         backdrop = backdrop,
                         dayAgentBackdrop = dayAgentBackdrop,
                         onSwipeDay = onSwipeDay,
-                        onContentUnderTopBarChange = { if (mode == targetMode) onContentUnderTopBarChange(it) },
+                        onContentUnderTopBarChange = { if (mode == HomeMode.Day) onContentUnderTopBarChange(it) },
                         dayAgentBackgroundMotionState = dayAgentBackgroundMotionState,
                         onAgentPagerSettledChange = onAgentPagerSettledChange,
                         onAgentPrepareOpen = onAgentPrepareOpen,
@@ -820,54 +827,77 @@ internal fun HomeScreen(
                         onAgentAction = onAgentAction
                     )
                 }
-                HomeMode.Week -> key(state.config.id) {
-                    val courseGlassRestorePlan = remember(
-                        courseGlassOcclusionPhase,
-                        courseGlassRestoredGroupKeys
-                    ) {
-                        CourseGlassRestorePlan(
-                            phase = courseGlassOcclusionPhase,
-                            restoredGroupKeys = courseGlassRestoredGroupKeys
-                        )
+            }
+        }
+
+        val secondaryMode = if (mode == HomeMode.Day) HomeMode.Week else mode
+        HomeSwitchPane(
+            motion = modeMotion,
+            secondary = true,
+            retainContent = true,
+            modifier = Modifier.fillMaxSize()
+        ) {
+            AnimatedContent(
+                targetState = secondaryMode,
+                modifier = Modifier.fillMaxSize(),
+                transitionSpec = {
+                    if (modeMotion.moving) {
+                        EnterTransition.None togetherWith ExitTransition.None
+                    } else {
+                        fadeIn(animationSpec = spring(dampingRatio = 0.88f, stiffness = 520f)) togetherWith
+                            fadeOut(animationSpec = spring(dampingRatio = 0.9f, stiffness = 540f))
                     }
-                    CompositionLocalProvider(
-                        LocalOverscrollFactory provides homeOverscrollFactory,
-                        LocalPersonalizationPreview provides personalizationPreviewState,
-                        LocalCourseGlassOcclusionPhase provides courseGlassOcclusionPhase,
-                        LocalCourseGlassRestorePlan provides courseGlassRestorePlan
-                    ) {
-                        SinglePillWeekScheduleScreen(
-                            state = state,
-                            displayWeek = displayWeek,
-                            returnToCurrentWeekRequest = returnToCurrentWeekRequest,
-                            adaptiveMetrics = adaptiveMetrics,
-                            cardHeight = effectiveWeekCardHeight,
-                            cardColor = cardColor,
-                            textColor = textColor,
-                            backdrop = backdrop,
-                            floatingCourseBackdrop = floatingCourseBackdrop,
-                            headerBackdrop = weekHeaderBackdrop,
-                            onSwipeWeek = onSwipeWeek,
-                            onWeekHeaderPreview = onWeekHeaderPreview,
-                            onWeekJumpSettled = onWeekJumpSettled,
-                            onContentUnderTopBarChange = { if (mode == targetMode) onContentUnderTopBarChange(it) },
-                            style = weekViewStyle,
-                            weekEditMode = weekEditMode,
-                            onEnterWeekEditMode = { weekEditMode = true },
-                            onUpdateCourseSingleWeek = onUpdateCourseSingleWeek,
-                            conflictFocusCourseId = conflictFocusCourseId,
-                            conflictFocusCourseKey = conflictFocusCourseKey,
-                            onResolveCourseConflict = onResolveCourseConflict,
-                            onDeleteCourseSingleWeek = onDeleteCourseSingleWeek,
-                            onCourseClick = { course, week, sourceBounds ->
-                                onCourseClick(course, week, sourceBounds)
+                },
+                label = "course-day-week-content"
+            ) { targetMode ->
+                modeStateHolder.SaveableStateProvider(targetMode.name) {
+                    when (targetMode) {
+                        HomeMode.Day -> Unit
+                        HomeMode.Week -> key(state.config.id) {
+                            val courseGlassRestorePlan = remember(
+                                courseGlassOcclusionPhase,
+                                courseGlassRestoredGroupKeys
+                            ) {
+                                CourseGlassRestorePlan(
+                                    phase = courseGlassOcclusionPhase,
+                                    restoredGroupKeys = courseGlassRestoredGroupKeys
+                                )
                             }
-                        )
+                            CompositionLocalProvider(
+                                LocalOverscrollFactory provides homeOverscrollFactory,
+                                LocalPersonalizationPreview provides personalizationPreviewState,
+                                LocalCourseGlassOcclusionPhase provides courseGlassOcclusionPhase,
+                                LocalCourseGlassRestorePlan provides courseGlassRestorePlan
+                            ) {
+                                SinglePillWeekScheduleScreen(
+                                    state = state,
+                                    displayWeek = displayWeek,
+                                    returnToCurrentWeekRequest = returnToCurrentWeekRequest,
+                                    adaptiveMetrics = adaptiveMetrics,
+                                    cardHeight = effectiveWeekCardHeight,
+                                    cardColor = cardColor,
+                                    textColor = textColor,
+                                    backdrop = backdrop,
+                                    floatingCourseBackdrop = floatingCourseBackdrop,
+                                    headerBackdrop = weekHeaderBackdrop,
+                                    onSwipeWeek = onSwipeWeek,
+                                    onWeekHeaderPreview = onWeekHeaderPreview,
+                                    onWeekJumpSettled = onWeekJumpSettled,
+                                    onContentUnderTopBarChange = { if (mode == HomeMode.Week) onContentUnderTopBarChange(it) },
+                                    style = weekViewStyle,
+                                    weekEditMode = weekEditMode,
+                                    onEnterWeekEditMode = { weekEditMode = true },
+                                    onUpdateCourseSingleWeek = onUpdateCourseSingleWeek,
+                                    conflictFocusCourseId = conflictFocusCourseId,
+                                    conflictFocusCourseKey = conflictFocusCourseKey,
+                                    onResolveCourseConflict = onResolveCourseConflict,
+                                    onDeleteCourseSingleWeek = onDeleteCourseSingleWeek,
+                                    onCourseClick = onCourseClick
+                                )
+                            }
+                        }
                     }
                 }
-            }
-            }
-            }
             }
         }
     }
@@ -1369,6 +1399,26 @@ internal fun weekCourseBuckets(
     )
 }
 
+/** Uses the same adjusted week projection as the week page for one concrete calendar date. */
+internal fun dayCoursesForScheduleDate(
+    courses: List<CourseEntity>,
+    periods: List<PeriodEntity>,
+    config: ScheduleConfigEntity,
+    date: LocalDate,
+    today: LocalDate = LocalDate.now()
+): List<CourseEntity> {
+    val week = com.xiaomanjun.sleepdownschedule.domain.schedule.adjustedTeachingWeekForDate(
+        config, date, today
+    ) ?: return emptyList()
+    val weekday = date.dayOfWeek.toChineseWeekday()
+    return weekCourseBuckets(courses, week, config, today).byWeekday[weekday]
+        .orEmpty()
+        .sortedWith(
+            compareBy<CourseEntity> { courseStartTime(it, periods) ?: LocalTime.MAX }
+                .thenBy { it.name }
+        )
+}
+
 internal fun visibleWeekdaysForBuckets(
     buckets: WeekCourseBuckets,
     hideEmptyWeekends: Boolean
@@ -1584,6 +1634,7 @@ internal fun shouldRenderSecondaryDay(
 internal fun DayScheduleScreen(
     state: AppState,
     todoItems: List<TodoItemEntity>,
+    onOpenTodos: () -> Unit = {},
     agentState: AppState = state,
     adaptiveMetrics: HomeAdaptiveMetrics,
     displayDate: LocalDate,
@@ -1695,24 +1746,22 @@ internal fun DayScheduleScreen(
             }
             // A day off keeps its regular cards on screen, greyed and read-only.
             val targetCancelled = targetAdjustment != null && targetAdjustment.sourceDate == null
-            val targetTeachingDate = com.xiaomanjun.sleepdownschedule.domain.schedule.teachingDateForSchedule(state.config, targetDate)
-            val targetWeekOrNull = when {
-                targetCancelled -> scheduleWeekForDateOrNull(state.config, targetDate)
-                else -> targetTeachingDate?.let {
-                    if (it != targetDate) com.xiaomanjun.sleepdownschedule.domain.schedule.adjustedTeachingWeekForDate(state.config, it)
-                    else scheduleWeekForDateOrNull(state.config, it)
-                }
-            }
+            val targetWeekOrNull = com.xiaomanjun.sleepdownschedule.domain.schedule.adjustedTeachingWeekForDate(
+                state.config, targetDate
+            )
             val targetWeek = targetWeekOrNull ?: effectiveCurrentWeek(state.config, targetDate)
-            val targetWeekday = (targetTeachingDate ?: targetDate).dayOfWeek.toChineseWeekday()
-            val dayCourses = remember(state.courses, state.periods, state.config.scheduleAdjustmentsJson, targetWeekOrNull, targetWeekday) {
-                if (targetWeekOrNull == null) emptyList() else weekCourseBuckets(state.courses, targetWeekOrNull)
-                    .byWeekday[targetWeekday]
-                    .orEmpty()
-                    .sortedWith(
-                        compareBy<CourseEntity> { courseStartTime(it, state.periods) ?: LocalTime.MAX }
-                            .thenBy { it.name }
-                    )
+            val targetWeekday = targetDate.dayOfWeek.toChineseWeekday()
+            val projectionToday = LocalDate.now()
+            val dayCourses = remember(
+                state.courses, state.periods, state.config, targetDate, projectionToday
+            ) {
+                dayCoursesForScheduleDate(
+                    courses = state.courses,
+                    periods = state.periods,
+                    config = state.config,
+                    date = targetDate,
+                    today = projectionToday
+                )
             }
             val backgroundFrozen = LocalHomeBackgroundFrozen.current
             val dayLifecycleOwner = LocalLifecycleOwner.current
@@ -1839,20 +1888,20 @@ internal fun DayScheduleScreen(
             val secondaryCourses = remember(
                 state.courses,
                 state.periods,
-                state.config.scheduleAdjustmentsJson,
-                secondaryWeekOrNull,
-                secondaryWeekday
+                state.config,
+                secondaryDate,
+                projectionToday
             ) {
-                if (secondaryWeekOrNull == null || secondaryWeekday == null) {
+                if (secondaryDate == null || secondaryWeekOrNull == null) {
                     emptyList()
                 } else {
-                    weekCourseBuckets(state.courses, secondaryWeekOrNull)
-                        .byWeekday[secondaryWeekday]
-                        .orEmpty()
-                        .sortedWith(
-                            compareBy<CourseEntity> { courseStartTime(it, state.periods) ?: LocalTime.MAX }
-                                .thenBy { it.name }
-                        )
+                    dayCoursesForScheduleDate(
+                        courses = state.courses,
+                        periods = state.periods,
+                        config = state.config,
+                        date = secondaryDate,
+                        today = projectionToday
+                    )
                 }
             }
             val groupedSecondaryCourses = remember(secondaryCourses, state.config) {
@@ -1871,9 +1920,7 @@ internal fun DayScheduleScreen(
                             rows = dailyAgenda,
                             backdrop = backdrop,
                             config = state.config,
-                            onTodoClick = {
-                                context.startActivity(Intent(context, TodoActivity::class.java))
-                            }
+                            onTodoClick = onOpenTodos
                         )
                     }
                 }

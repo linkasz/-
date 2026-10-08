@@ -78,7 +78,10 @@ class BackupRestoreService(
                 appContext.getSharedPreferences(it, Context.MODE_PRIVATE).all.isNotEmpty()
             } || AiImportHistoryStore.loadForBackup(appContext).isNotEmpty(),
             hasWidgetAppearances = database.widgetAppearanceDao().getAll().isNotEmpty(),
-            syncedTodoCount = todoItems.count { it.calendarEventId != null }
+            syncedTodoCount = todoItems.count {
+                it.calendarSyncState == com.xiaomanjun.sleepdownschedule.feature.todo.TodoCalendarSyncState.LINKED ||
+                    it.calendarSyncState == com.xiaomanjun.sleepdownschedule.feature.todo.TodoCalendarSyncState.LOCAL_ONLY
+            }
         )
     }
 

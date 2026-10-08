@@ -6,6 +6,7 @@ import androidx.room.testing.MigrationTestHelper
 import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.xiaomanjun.sleepdownschedule.data.local.CalendarEventLocalIdStore
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -14,6 +15,26 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class AppDatabaseMigrationTest {
+    @Test
+    fun migrate44To45PreservesOldReminderAndVirtualizesInbox() {
+        helper.createDatabase(TEST_DATABASE, 44).use { database ->
+            database.execSQL("INSERT INTO todo_groups (id,name) VALUES (30,'收件箱')")
+            database.execSQL("INSERT INTO todo_groups (id,name) VALUES (31,'学习')")
+            database.execSQL("INSERT INTO todo_items (id,title,groupId,dueAt,createdAt,updatedAt) VALUES (30,'旧任务',30,1800000000000,1,1)")
+            database.execSQL("INSERT INTO todo_items (id,title,groupId,parentId,createdAt,updatedAt) VALUES (31,'子任务',31,30,1,1)")
+        }
+        helper.runMigrationsAndValidate(TEST_DATABASE, APP_DATABASE_VERSION, true,
+            *APP_DATABASE_MIGRATIONS.toTypedArray()).use { database ->
+            assertSingleNull(database, "SELECT groupId FROM todo_items WHERE id=30")
+            assertSingleText(database, "SELECT reminderMode FROM todo_items WHERE id=30", "LEGACY")
+            assertSingleValue(database, "SELECT reminderTimeMinutes FROM todo_items WHERE id=30", 480)
+            assertSingleNull(database, "SELECT deletedAt FROM todo_items WHERE id=30")
+            assertSingleNull(database, "SELECT endAt FROM todo_items WHERE id=30")
+            assertSingleValue(database, "SELECT parentId FROM todo_items WHERE id=31", 30)
+            assertSingleText(database, "SELECT name FROM todo_groups WHERE id=31", "学习")
+            assertSingleValue(database, "SELECT COUNT(*) FROM todo_groups WHERE id=30", 0)
+        }
+    }
     @get:Rule
     val helper = MigrationTestHelper(
         InstrumentationRegistry.getInstrumentation(),
@@ -33,6 +54,7 @@ class AppDatabaseMigrationTest {
             *APP_DATABASE_MIGRATIONS.toTypedArray()
         ).use { database ->
             assertSingleText(database, "SELECT name FROM courses WHERE id=42", "保留课程")
+            database.execSQL("PRAGMA foreign_keys = ON")
             database.execSQL("INSERT INTO todo_groups (id,name) VALUES (1,'收件箱')")
             database.execSQL("INSERT INTO todo_items (id,title,createdAt,updatedAt) VALUES (10,'父任务',1,1)")
             database.execSQL("INSERT INTO todo_items (id,title,parentId,groupId,createdAt,updatedAt) VALUES (11,'子任务',10,1,2,2)")
@@ -43,6 +65,49 @@ class AppDatabaseMigrationTest {
             }
             database.execSQL("DELETE FROM todo_items WHERE id=10")
             assertSingleValue(database, "SELECT COUNT(*) FROM todo_items WHERE id=11", 0)
+        }
+    }
+
+    @Test
+    fun migrate43To44BackfillsCalendarTokensOnlyForPreviouslyLinkedTodos() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        CalendarEventLocalIdStore.initialize(context)
+        helper.createDatabase(TEST_DATABASE, 43).use { database ->
+            database.execSQL("INSERT INTO todo_items (id,title,createdAt,updatedAt,calendarEventId) VALUES (20,'已关联',1,1,900)")
+            database.execSQL("INSERT INTO todo_items (id,title,createdAt,updatedAt) VALUES (21,'未同步',2,2)")
+        }
+
+        helper.runMigrationsAndValidate(
+            TEST_DATABASE,
+            APP_DATABASE_VERSION,
+            true,
+            *APP_DATABASE_MIGRATIONS.toTypedArray()
+        ).use { database ->
+            database.query("SELECT calendarSyncToken, calendarSyncState FROM todo_items WHERE id=20").use { cursor ->
+                check(cursor.moveToFirst())
+                assertEquals(32, cursor.getString(0).length)
+                assertEquals("LINKED", cursor.getString(1))
+            }
+            assertSingleNull(database, "SELECT calendarEventId FROM todo_items WHERE id=20")
+            val token = database.query("SELECT calendarSyncToken FROM todo_items WHERE id=20").use { cursor ->
+                check(cursor.moveToFirst())
+                cursor.getString(0)
+            }
+            assertEquals(900L, CalendarEventLocalIdStore.get(token))
+            CalendarEventLocalIdStore.remove(token)
+            database.query("SELECT calendarSyncToken, calendarSyncState FROM todo_items WHERE id=21").use { cursor ->
+                check(cursor.moveToFirst())
+                assertEquals(true, cursor.isNull(0))
+                assertEquals("PENDING", cursor.getString(1))
+            }
+            assertSingleValue(database, "SELECT COUNT(DISTINCT calendarSyncToken) FROM todo_items WHERE calendarSyncToken IS NOT NULL", 1)
+        }
+    }
+
+    private fun assertSingleNull(database: SupportSQLiteDatabase, sql: String) {
+        database.query(sql).use { cursor ->
+            check(cursor.moveToFirst())
+            assertEquals(true, cursor.isNull(0))
         }
     }
 
@@ -302,10 +367,10 @@ class AppDatabaseMigrationTest {
     fun migrate27To34PreservesTimelineAndAddsNoonColumn() = runLegacyMigrationTest(27)
 
     @Test
-    fun repairPartial28SchemaPreservesExistingNoonTopology() {
+    fun migrateReal28SchemaPreservesExistingNoonTopology() {
         runBlocking {
             val context = InstrumentationRegistry.getInstrumentation().targetContext
-            val databaseName = "repair-partial-v28-v34-test"
+            val databaseName = "migration-real-v28-current-test"
             context.deleteDatabase(databaseName)
             createLegacyDatabase(context, databaseName, 27)
             SQLiteDatabase.openDatabase(
@@ -319,6 +384,40 @@ class AppDatabaseMigrationTest {
                 database.execSQL(
                     "UPDATE schedule_config SET morningPeriodCount = 1, noonPeriodCount = 1, afternoonPeriodCount = 1, eveningPeriodCount = 1 WHERE id = 7"
                 )
+                database.execSQL(
+                    """
+                    CREATE TABLE period_schemes_v28 (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        scheduleId INTEGER NOT NULL,
+                        name TEXT NOT NULL,
+                        mode TEXT NOT NULL,
+                        isActive INTEGER NOT NULL,
+                        classDurationMinutes INTEGER NOT NULL,
+                        breakDurationMinutes INTEGER NOT NULL,
+                        morningStartTime TEXT NOT NULL,
+                        noonStartTime TEXT NOT NULL,
+                        afternoonStartTime TEXT NOT NULL,
+                        eveningStartTime TEXT NOT NULL,
+                        specialBreaksJson TEXT NOT NULL,
+                        overridesJson TEXT NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                database.execSQL(
+                    """
+                    INSERT INTO period_schemes_v28 (
+                        id, scheduleId, name, mode, isActive, classDurationMinutes, breakDurationMinutes,
+                        morningStartTime, noonStartTime, afternoonStartTime, eveningStartTime,
+                        specialBreaksJson, overridesJson
+                    )
+                    SELECT id, scheduleId, name, mode, isActive, classDurationMinutes, breakDurationMinutes,
+                        morningStartTime, '12:00', afternoonStartTime, eveningStartTime,
+                        specialBreaksJson, overridesJson
+                    FROM period_schemes
+                    """.trimIndent()
+                )
+                database.execSQL("DROP TABLE period_schemes")
+                database.execSQL("ALTER TABLE period_schemes_v28 RENAME TO period_schemes")
                 database.version = 28
             }
 

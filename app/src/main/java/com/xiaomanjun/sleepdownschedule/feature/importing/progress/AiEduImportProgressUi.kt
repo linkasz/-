@@ -270,7 +270,7 @@ internal fun AiEduImportProgressPage(
         onImportSubmitted()
     }
     val listState = rememberLazyListState()
-    val textColor = glassForegroundColor(settingsVisualConfig(config))
+    val textColor = glassForegroundColor(config)
     val pageTitle = current.routeLabel.takeIf { it.isNotBlank() } ?: "AI 教务导入"
     var executionExpanded by remember { mutableStateOf(!current.finished) }
     var previewAttachment by remember { mutableStateOf<AiEduAttachmentPreviewRequest?>(null) }
@@ -285,14 +285,6 @@ internal fun AiEduImportProgressPage(
         domain = GlassBackdropDomain.ActivityBackground,
         providerId = "ai-import-preview-scene"
     ) { drawContent() }
-    val conversationPageColor = settingsPageBackground(settingsVisualConfig(config))
-    val conversationContentBackdrop = rememberGlassLayerBackdrop(
-        domain = GlassBackdropDomain.Content,
-        providerId = "ai-import-conversation-content"
-    ) {
-        drawRect(conversationPageColor)
-        drawContent()
-    }
     val historySnapshotLayer = rememberGraphicsLayer()
     val historySnapshotRequested = remember { AtomicBoolean(false) }
     var historySnapshotRequestVersion by remember { mutableStateOf(0) }
@@ -471,12 +463,7 @@ internal fun AiEduImportProgressPage(
             }
         ) { backdrop ->
             Box(Modifier.fillMaxSize()) {
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .glassBackdropProducer(conversationContentBackdrop)
-                ) {
-                    LazyColumn(
+                LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(
@@ -562,13 +549,12 @@ internal fun AiEduImportProgressPage(
                         )
                     }
                 }
-                    }
                 }
                 AiEduConversationComposer(
                     value = conversationInput,
                     sending = conversationSending,
                     config = config,
-                    backdrop = conversationContentBackdrop,
+                    backdrop = backdrop,
                     runtimePickerState = runtimePickerState,
                     textColor = textColor,
                     attachmentVisible = !current.requestSent &&

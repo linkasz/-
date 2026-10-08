@@ -21,13 +21,14 @@ class TodoWidgetActionReceiver : BroadcastReceiver() {
                 val app = context.applicationContext as CourseScheduleApp
                 val dao = app.database.todoDao()
                 val item = dao.getById(todoId) ?: return@launch
-                if (item.isCompleted || item.parentId != null) return@launch
+                if (item.deletedAt != null || item.isCompleted || item.parentId != null) return@launch
 
                 val repository = TodoRepository(dao)
                 val calendarSync = TodoCalendarSync(context.applicationContext, repository)
                 runCatching { calendarSync.remove(item) }
                     .onFailure { Log.w(TAG, "Could not remove completed task from system calendar", it) }
                 dao.toggleCompleted(item, System.currentTimeMillis())
+                androidx.core.app.NotificationManagerCompat.from(context).cancel(item.id.hashCode())
                 NotificationScheduler.requestReschedule(context.applicationContext)
                 if (calendarSync.autoSyncEnabled() && calendarSync.hasCalendarPermission()) {
                     runCatching { calendarSync.syncAll() }

@@ -1,0 +1,212 @@
+[
+  {
+    "file": "private-source-01",
+    "id": "role-01",
+    "status": "主来源"
+  },
+  {
+    "file": "private-source-02",
+    "id": "role-02",
+    "status": "主来源"
+  },
+  {
+    "file": "private-source-03",
+    "id": "role-03",
+    "status": "主来源"
+  },
+  {
+    "file": "private-source-04",
+    "id": "role-04",
+    "status": "主来源"
+  },
+  {
+    "file": "private-source-05",
+    "id": "role-04",
+    "status": "合并到优化版本"
+  },
+  {
+    "file": "private-source-06",
+    "id": "role-05",
+    "status": "主来源"
+  },
+  {
+    "file": "private-source-07",
+    "id": "role-06",
+    "status": "主来源"
+  },
+  {
+    "file": "private-source-08",
+    "id": "role-07",
+    "status": "主来源"
+  },
+  {
+    "file": "private-source-09",
+    "id": "role-08",
+    "status": "主来源"
+  },
+  {
+    "file": "private-source-10",
+    "id": "role-09",
+    "status": "主来源"
+  },
+  {
+    "file": "private-source-11",
+    "id": "role-10",
+    "status": "主来源"
+  },
+  {
+    "file": "private-source-12",
+    "id": "role-11",
+    "status": "主来源"
+  },
+  {
+    "file": "private-source-13",
+    "id": "role-12",
+    "status": "主来源"
+  },
+  {
+    "file": "private-source-14",
+    "id": "role-13",
+    "status": "主来源"
+  },
+  {
+    "file": "private-source-15",
+    "id": "role-14",
+    "status": "主来源"
+  },
+  {
+    "file": "private-source-16",
+    "id": "role-15",
+    "status": "主来源"
+  },
+  {
+    "file": "private-source-17",
+    "id": "role-16",
+    "status": "主来源"
+  },
+  {
+    "file": "private-source-18",
+    "id": "role-17",
+    "status": "主来源"
+  },
+  {
+    "file": "private-source-19",
+    "id": "role-18",
+    "status": "主来源"
+  },
+  {
+    "file": "private-source-20",
+    "id": "role-19",
+    "status": "主来源"
+  },
+  {
+    "file": "private-source-21",
+    "id": "role-20",
+    "status": "合并到优化版本"
+  },
+  {
+    "file": "private-source-22",
+    "id": "role-20",
+    "status": "主来源"
+  },
+  {
+    "file": "private-source-23",
+    "id": "role-21",
+    "status": "合并到优化版本"
+  },
+  {
+    "file": "private-source-24",
+    "id": "role-21",
+    "status": "主来源"
+  },
+  {
+    "file": "private-source-25",
+    "id": "role-22",
+    "status": "主来源"
+  },
+  {
+    "file": "private-source-26",
+    "id": "role-23",
+    "status": "主来源"
+  },
+  {
+    "file": "private-source-27",
+    "id": "role-24",
+    "status": "主来源"
+  },
+  {
+    "file": "private-source-28",
+    "id": "role-25",
+    "status": "主来源"
+  },
+  {
+    "file": "private-source-29",
+    "id": "role-26",
+    "status": "主来源"
+  },
+  {
+    "file": "private-source-30",
+    "id": "role-27",
+    "status": "主来源"
+  },
+  {
+    "file": "private-source-31",
+    "id": "role-28",
+    "status": "主来源"
+  },
+  {
+    "file": "private-source-32",
+    "id": "role-29",
+    "status": "主来源"
+  },
+  {
+    "file": "private-source-33",
+    "id": "role-30",
+    "status": "主来源"
+  },
+  {
+    "file": "private-source-34",
+    "id": "role-31",
+    "status": "主来源"
+  },
+  {
+    "file": "private-source-35",
+    "id": "role-32",
+    "status": "主来源"
+  },
+  {
+    "file": "private-source-36",
+    "id": "role-33",
+    "status": "主来源"
+  },
+  {
+    "file": "private-source-37",
+    "id": "role-34",
+    "status": "主来源"
+  },
+  {
+    "file": "private-source-38",
+    "id": "role-35",
+    "status": "主来源"
+  },
+  {
+    "file": "private-source-39",
+    "id": "role-36",
+    "status": "主来源"
+  },
+  {
+    "file": "private-source-40",
+    "id": "role-37",
+    "status": "主来源"
+  },
+  {
+    "file": "private-source-41",
+    "id": "role-38",
+    "status": "主来源"
+  },
+  {
+    "file": "private-source-42",
+    "id": "world-background",
+    "status": "背景参考，不独立提供人格"
+  }
+]

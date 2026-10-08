@@ -24,7 +24,7 @@ class AgentPlanSafetyTest {
     @Test fun invalidSecondOperationRejectsWholePlan() {
         val parsed = parse("""[{"type":"DELETE_COURSE","courseId":42},{"type":"UPDATE_COURSE","courseId":999,"course":{"name":"新名"}}]""")
         assertTrue(parsed.actions.isEmpty())
-        assertTrue(parsed.displayText.contains("未执行任何修改"))
+        assertTrue(parsed.validationIssues.isNotEmpty())
     }
 
     @Test fun rootClearFieldsMatchesPromptAndKeepsOtherFields() {

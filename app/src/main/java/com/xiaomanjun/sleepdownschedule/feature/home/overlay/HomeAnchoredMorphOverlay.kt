@@ -146,9 +146,9 @@ import kotlin.math.sign
 import kotlin.math.sin
 
 internal const val HomeAnchoredMorphOpenDurationMillis = 430
-internal const val HomePersonalizeMorphOpenDurationMillis = 340
+internal const val HomePersonalizeMorphOpenDurationMillis = ThreeDotMenuMotion.OpenDurationMillis
 internal const val HomeAnchoredMorphCloseDurationMillis = 360
-internal const val HomePersonalizeMorphCloseDurationMillis = 220
+internal const val HomePersonalizeMorphCloseDurationMillis = ThreeDotMenuMotion.CloseDurationMillis
 internal const val HomeAnchoredOpenSettleStartFraction = 0.82f
 internal const val HomeAnchoredMorphPinchFraction = 0.28f
 internal const val HomeAnchoredMorphClosePinchFraction = 0.08f
@@ -1418,11 +1418,7 @@ internal fun HomeAnchoredMorphOverlayHost(
                         val innerY = targetPosition.y - menuContentTopPaddingPx
                         if (innerY in 0f..menuModeHeightPx) {
                             val innerWidth = targetRect.width - menuContentHorizontalPaddingPx * 2f
-                            val targetMode = HomeMode.entries[
-                                ((innerX / innerWidth) * HomeMode.entries.size)
-                                    .toInt()
-                                    .coerceIn(HomeMode.entries.indices)
-                            ]
+                            val targetMode = homeModeAtFraction(innerX / innerWidth)
                             if (targetMode != homeMode) {
                                 outsideDragHaptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 onHomeModeChange(targetMode)
@@ -2582,11 +2578,7 @@ internal fun HomeAddMenuMorphPanel(
                     if (completedNormally) {
                         val innerY = lastPosition.y - contentTopPaddingPx
                         if (showModeSwitch && innerY in 0f..modeHeightPx) {
-                            val targetMode = HomeMode.entries[
-                                ((lastPosition.x / size.width) * HomeMode.entries.size)
-                                    .toInt()
-                                    .coerceIn(HomeMode.entries.indices)
-                            ]
+                            val targetMode = homeModeAtFraction(lastPosition.x / size.width)
                             if (targetMode != homeMode) {
                                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 onHomeModeChange(targetMode)
@@ -2664,7 +2656,7 @@ internal fun HomeAddMenuMorphPanel(
                 if (showModeSwitch) {
                     Row(
                         modifier = Modifier
-                            .width(150.dp)
+                            .width(HomeAddMenuActionContentWidthDp.dp)
                             .align(Alignment.CenterHorizontally)
                             .height(HomeAddMenuModeHeightDp.dp),
                         horizontalArrangement = Arrangement.spacedBy(2.dp)

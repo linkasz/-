@@ -182,7 +182,7 @@ object IcsScheduleCodec {
         return buildString {
             appendLine("BEGIN:VCALENDAR")
             appendLine("VERSION:2.0")
-            appendLine("PRODID:-//SleepDown Schedule//Course Schedule//CN")
+            appendLine("PRODID:-//Shixu Qingdan//Course Schedule//CN")
             appendLine("CALSCALE:GREGORIAN")
             appendLine("METHOD:PUBLISH")
             appendLine("X-WR-CALNAME:${escapeText(calendarName)}")
@@ -236,7 +236,7 @@ object IcsScheduleCodec {
         courses: List<CourseEntity>
     ): File {
         val directory = File(context.cacheDir, "shared_schedules").apply { mkdirs() }
-        val safeName = calendarName.replace(Regex("[\\\\/:*?\"<>|]"), "_").ifBlank { "SleepDown课表" }
+        val safeName = calendarName.replace(Regex("[\\\\/:*?\"<>|]"), "_").ifBlank { "时序清单课表" }
         return File(directory, "$safeName.ics").apply {
             writeText(export(calendarName, config, periods, courses), Charsets.UTF_8)
         }

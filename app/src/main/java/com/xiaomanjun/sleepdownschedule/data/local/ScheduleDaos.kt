@@ -214,6 +214,9 @@ interface AgentDao {
     @Query("SELECT * FROM agent_messages ORDER BY scheduleId, sessionDate, createdAt, id")
     suspend fun getAllMessages(): List<AgentMessageEntity>
 
+    @Query("SELECT * FROM agent_messages WHERE role IN ('user', 'assistant') ORDER BY sessionDate DESC, createdAt DESC, id DESC")
+    fun observeConversationHistory(): Flow<List<AgentMessageEntity>>
+
     @Query("SELECT * FROM agent_messages WHERE scheduleId = :scheduleId ORDER BY sessionDate, createdAt, id")
     suspend fun getMessages(scheduleId: Int): List<AgentMessageEntity>
 
@@ -222,6 +225,15 @@ interface AgentDao {
 
     @Query("UPDATE agent_messages SET status = :status WHERE id = :messageId")
     suspend fun updateMessageStatus(messageId: Long, status: String)
+
+    @Query("UPDATE agent_messages SET content = :content, status = 'READY' WHERE id = :messageId AND status != 'PENDING'")
+    suspend fun editConversationMessage(messageId: Long, content: String): Int
+
+    @Query("DELETE FROM agent_messages WHERE id = :messageId AND status != 'PENDING'")
+    suspend fun deleteConversationMessage(messageId: Long): Int
+
+    @Query("DELETE FROM agent_messages WHERE scheduleId = :scheduleId AND sessionDate = :key")
+    suspend fun deleteConversation(scheduleId: Int, key: String)
 
     @Query("UPDATE agent_messages SET status = 'FAILED' WHERE status = 'PENDING' AND createdAt < :cutoff")
     suspend fun failPendingMessagesBefore(cutoff: Long)

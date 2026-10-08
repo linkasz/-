@@ -4,6 +4,7 @@ import com.xiaomanjun.sleepdownschedule.*
 import com.xiaomanjun.sleepdownschedule.glass.ui.*
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
@@ -44,6 +45,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -126,9 +128,9 @@ fun LiquidDialogSurface(
         Color(0xFF111111)
     }
     val surfaceColor = if (dark) {
-        Color(0xFF121212).copy(alpha = 0.28f)
+        Color(0xFF121212).copy(alpha = if (followGlassContrast) 0.28f else 0.94f)
     } else {
-        Color.White.copy(alpha = 0.18f)
+        Color.White.copy(alpha = if (followGlassContrast) 0.18f else 0.96f)
     }
     val panelModifier = modifier
         .width(dialogWidth)
@@ -141,7 +143,10 @@ fun LiquidDialogSurface(
         )
 
     val panelContent: @Composable BoxScope.() -> Unit = {
-        CompositionLocalProvider(LocalContentColor provides textColor) {
+        CompositionLocalProvider(
+            LocalContentColor provides textColor,
+            com.xiaomanjun.sleepdownschedule.glass.ui.LocalReadablePanelControls provides !followGlassContrast
+        ) {
             Box(
                 modifier = (if (size == LiquidDialogSize.Standard) Modifier.fillMaxSize() else Modifier.fillMaxWidth())
                     .clip(shape)
@@ -542,7 +547,7 @@ private fun LiquidAlertActionButton(
         baseSurfaceColor.copy(alpha = (baseSurfaceColor.alpha * 0.45f).coerceAtLeast(0.12f))
     }
     val shape = Capsule()
-    if (backdrop != null) {
+    if (backdrop != null && !com.xiaomanjun.sleepdownschedule.glass.ui.LocalReadablePanelControls.current) {
         LiquidButton(
             onClick = if (action.enabled) action.onClick else ({ }),
             backdrop = backdrop,
@@ -646,7 +651,8 @@ fun DialogLiquidButton(
                 .copy(alpha = if (controlDark) 0.46f else 0.62f)
         } else Color.Transparent
     }
-    if (backdrop != null) {
+    // Neutral modal controls use their own base instead of lensing the page's text.
+    if (backdrop != null && !com.xiaomanjun.sleepdownschedule.glass.ui.LocalReadablePanelControls.current) {
         LiquidButton(
             onClick = onClick,
             backdrop = backdrop,
@@ -719,17 +725,27 @@ fun DialogCapsuleField(
     minLines: Int = 1,
     cornerRadius: Dp? = null,
     fieldTextColor: Color? = null,
-    fieldLightStyleOverride: Boolean? = null
+    fieldLightStyleOverride: Boolean? = null,
+    visualTransformation: androidx.compose.ui.text.input.VisualTransformation = androidx.compose.ui.text.input.VisualTransformation.None,
+    enabled: Boolean = true,
+    outlined: Boolean = false
 ) {
     val dark = fieldLightStyleOverride?.not() ?: appUsesDarkTheme(config)
     val fieldBase = if (dark) Color(0xFF2C2C2E) else Color.White
-    val background = fieldBase.copy(alpha = if (dark) 0.54f else 0.70f)
+    val readable = LocalReadablePanelControls.current
+    val background = if (readable) (if (dark) Color(0xFF2C2C2E) else Color(0xFFF0F2F6))
+        else fieldBase.copy(alpha = if (dark) 0.54f else 0.70f)
     val textColor = fieldTextColor ?: LocalContentColor.current
+    var focused by remember { mutableStateOf(false) }
+    val fieldShape = RoundedRectangle(cornerRadius ?: if (minLines == 1)
+        SleepDownDesignTokens.Field.SingleLineCorner else SleepDownDesignTokens.Field.MultiLineCorner)
     BasicTextField(
         value = value,
         onValueChange = onValueChange,
         minLines = minLines,
         singleLine = minLines == 1,
+        visualTransformation = visualTransformation,
+        enabled = enabled,
         keyboardOptions = KeyboardOptions(
             keyboardType = keyboardType,
             imeAction = if (minLines == 1) ImeAction.Done else ImeAction.Default
@@ -737,16 +753,12 @@ fun DialogCapsuleField(
         textStyle = MaterialTheme.typography.bodyLarge.copy(color = textColor),
         cursorBrush = SolidColor(textColor),
         modifier = modifier
-            .clip(
-                RoundedRectangle(
-                    cornerRadius ?: if (minLines == 1) {
-                        SleepDownDesignTokens.Field.SingleLineCorner
-                    } else {
-                        SleepDownDesignTokens.Field.MultiLineCorner
-                    }
-                )
-            )
+            .onFocusChanged { focused = it.isFocused }
+            .clip(fieldShape)
             .background(background)
+            // Opaque settings sheets need an actual outline; white-on-white fills hide the input boundary.
+            .then(if (readable || outlined) Modifier.border(if (focused) 1.5.dp else 1.dp,
+                if (focused) MaterialTheme.colorScheme.primary else textColor.copy(alpha = if (enabled) .28f else .12f), fieldShape) else Modifier)
             .padding(
                 horizontal = SleepDownDesignTokens.Field.HorizontalPadding,
                 vertical = if (minLines == 1) {
@@ -769,4 +781,15 @@ fun DialogCapsuleField(
             }
         }
     )
+}
+
+/** Persistent labels stay readable after typing, unlike placeholder-only persona settings. */
+@Composable
+fun LabeledDialogCapsuleField(label: String, value: String, onValueChange: (String) -> Unit,
+    placeholder: String, config: ScheduleConfigEntity, minLines: Int = 1, enabled: Boolean = true) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(label, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(start = 6.dp))
+        DialogCapsuleField(value, onValueChange, placeholder, config, Modifier.fillMaxWidth(),
+            minLines = minLines, enabled = enabled, outlined = true)
+    }
 }

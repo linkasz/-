@@ -87,7 +87,7 @@ internal object AiImportRepairManager {
         val cleaned = ScheduleImportParser.cleanMarkdown(output).trim()
         val boundedOutput = cleaned.take(MaxRepairOutputCharacters)
         return buildString {
-            appendLine("你刚才生成的课程表数据无法通过 SleepDown 本地校验。")
+            appendLine("你刚才生成的课程表数据无法通过 时序清单 本地校验。")
             appendLine("错误类型：${failure.errorType}")
             appendLine("错误字段：${failure.field ?: "unknown"}")
             appendLine("错误摘要：${failure.debugMessage.take(300)}")

@@ -138,7 +138,7 @@ private fun AiImportHistoryPage(
     onOpen: (AiImportHistoryEntry, androidx.compose.ui.geometry.Rect, Bitmap?, Bitmap?) -> Unit
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val textColor = glassForegroundColor(settingsVisualConfig(config))
+    val textColor = glassForegroundColor(config)
     var entries by remember { mutableStateOf(AiImportHistoryStore.load(context)) }
     val scope = rememberCoroutineScope()
     val snapshotLayer = rememberGraphicsLayer()

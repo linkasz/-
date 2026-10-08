@@ -12,7 +12,14 @@ import com.xiaomanjun.sleepdownschedule.app.config.SleepDownRemoteConfig
 import com.xiaomanjun.sleepdownschedule.core.remoteconfig.*
 import com.xiaomanjun.sleepdownschedule.feature.importing.*
 import com.xiaomanjun.sleepdownschedule.core.identity.AppDistribution
+import com.xiaomanjun.sleepdownschedule.core.identity.AppIconManager
+import com.xiaomanjun.sleepdownschedule.core.identity.AppIconPicker
+import com.xiaomanjun.sleepdownschedule.feature.todo.TodoAiExtractor
+import com.xiaomanjun.sleepdownschedule.feature.todo.TodoAiSettingsDialog
+import android.content.Intent
 import com.xiaomanjun.sleepdownschedule.feature.agent.*
+import com.xiaomanjun.sleepdownschedule.feature.agent.voice.VoiceSettingsStore
+import com.xiaomanjun.sleepdownschedule.feature.agent.voice.VoiceSettingsDialog
 import android.content.Context
 import android.net.Uri
 import android.provider.Settings
@@ -100,6 +107,12 @@ fun GeneralSettingsScreen(
         }
     }
     val visualConfig = settingsVisualConfig(draft)
+    var showIconPicker by remember { mutableStateOf(false) }
+    val iconRevision by AppIconManager.changes.collectAsStateWithLifecycle()
+    val iconLabel = remember(iconRevision) { AppIconManager.currentPalette(context).label }
+    if (showIconPicker) AppIconPicker(LocalSettingsPopupBackdrop.current ?: backdrop, visualConfig) {
+        showIconPicker = false
+    }
     fun applyChange(next: ScheduleConfigEntity) {
         draft = next
         hasLocalEdits = true
@@ -126,6 +139,8 @@ fun GeneralSettingsScreen(
         item(key = "general-appearance") {
             GlassPreferenceSection("外观与布局") {
                 SettingsGroup(backdrop = backdrop, config = visualConfig, modifier = Modifier.fillMaxWidth()) {
+                    SettingsNavigationRow("应用图标", iconLabel, onClick = { showIconPicker = true })
+                    SettingsDivider()
                     SettingsToggleRow(
                         title = "跟随系统",
                         subtitle = "开启后将跟随系统切换浅色或深色模式。",
@@ -228,6 +243,12 @@ fun AiImportSettingsScreen(
 @Composable
 fun DayAgentSettingsScreen(state: AppState, backdrop: Backdrop?) {
     val context = LocalContext.current
+    var voiceReadAloud by remember { mutableStateOf(VoiceSettingsStore.load(context).readAloud) }
+    androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+        voiceReadAloud = VoiceSettingsStore.load(context).readAloud
+    }
+    var showConversationHistory by remember { mutableStateOf(false) }
+    var showPersona by remember { mutableStateOf(false) }
     var enabled by remember { mutableStateOf(DayAgentPreferences.isEnabled(context)) }
     var weekAssistantEnabled by remember { mutableStateOf(DayAgentPreferences.isWeekAssistantEnabled(context)) }
     var weatherEnabled by remember { mutableStateOf(DayAgentPreferences.isWeatherEnabled(context)) }
@@ -240,6 +261,11 @@ fun DayAgentSettingsScreen(state: AppState, backdrop: Backdrop?) {
     val popupBackdrop = LocalSettingsPopupBackdrop.current ?: backdrop
     val topPadding = detailContentTopPadding()
 
+    if (showConversationHistory) AgentConversationHistoryDialog(popupBackdrop, settingsVisualConfig(state.config)) {
+        showConversationHistory = false
+    }
+    if (showPersona) AgentPersonaDialog(popupBackdrop, settingsVisualConfig(state.config)) { showPersona = false }
+
     SleepDownSecondaryPageList(
         contentTopPadding = topPadding,
         contentBottomPadding = DockScrollPadding
@@ -249,8 +275,30 @@ fun DayAgentSettingsScreen(state: AppState, backdrop: Backdrop?) {
                 SettingsGroup(backdrop = backdrop, config = state.config, modifier = Modifier.fillMaxWidth()) {
                     SettingsInfoRow(
                         "AI助理",
-                        "日视图展示今日安排；周视图下拉进入对话，在课前与开始时提醒。两个入口共享消息记录。"
+                        "陪你了解每天的课程与天气，整理计划和待办。课程页下拉与对话记录共享同一段对话。"
                     )
+                    SettingsDivider()
+                    SettingsNavigationRow(title = "AI 设置",
+                        subtitle = "统一管理对话、语音与待办提取的服务和凭据。",
+                        onClick = {
+                            context.startActivity(Intent(context, SettingsDetailActivity::class.java)
+                                .putExtra(SettingsDetailPageExtra, SettingsPage.AiImport.name))
+                        })
+                    SettingsDivider()
+                    SettingsNavigationRow(title = "助理人格", subtitle = "设定伴侣的名字、身份、表达风格和对你的称呼。",
+                        onClick = { showPersona = true })
+                    SettingsDivider()
+                    SettingsNavigationRow(title = "对话记录",
+                        subtitle = "新建、搜索、重命名、继续对话，编辑或删除消息。",
+                        onClick = { showConversationHistory = true })
+                    SettingsDivider()
+                    SettingsToggleRow(title = "自动朗读语音回复",
+                        subtitle = "关闭后仅显示文字；下一次开启语音时生效。",
+                        checked = voiceReadAloud, backdrop = backdrop,
+                        onCheckedChange = {
+                            VoiceSettingsStore.setReadAloud(context, it)
+                            voiceReadAloud = it
+                        })
                     SettingsDivider()
                     SettingsToggleRow(
                         title = "启用AI助理",
@@ -453,6 +501,16 @@ fun AiImportSettingsSection(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    var showVoiceSettings by remember { mutableStateOf(false) }
+    var showTodoSettings by remember { mutableStateOf(false) }
+    val todoExtractor = remember(context) { TodoAiExtractor(context) }
+    val popupBackdrop = LocalSettingsPopupBackdrop.current ?: backdrop
+    val visualConfig = settingsVisualConfig(state.config)
+    if (showVoiceSettings) VoiceSettingsDialog(popupBackdrop, visualConfig,
+        onDismiss = { showVoiceSettings = false })
+    if (showTodoSettings) TodoAiSettingsDialog(todoExtractor.readConfig(), popupBackdrop, visualConfig,
+        onDismiss = { showTodoSettings = false },
+        onSave = { todoExtractor.saveConfig(it); showTodoSettings = false })
     var saved by remember { mutableStateOf(AiImportSettingsStore.load(context)) }
     var selectedProviderId by remember(saved.profile.id) { mutableStateOf(saved.profile.id) }
     var customProviderName by remember(saved.profile.id) { mutableStateOf(saved.profile.displayName) }
@@ -495,7 +553,6 @@ fun AiImportSettingsSection(
         ?: presets.firstOrNull { it.id == selectedProviderId }
         ?: AiProviderPresets.byId(selectedProviderId)
     val isCustomProvider = AiProviderPresets.isCustomId(selectedProviderId)
-    val isManagedFreeProvider = AiProviderPresets.isManagedFreeId(selectedProviderId)
     val effectiveCustomProviderName = customProviderName.trim().ifBlank { selectedPreset.displayName }
     val customProviderDisplayName = effectiveCustomProviderName.ifBlank { "未命名自定义接口" }
     val pickerPresets = if (isCustomProvider) {
@@ -512,14 +569,14 @@ fun AiImportSettingsSection(
     }
     val aiDisabled = selectedProviderId == AiProviderPresets.none.id
     val configuredModelIds = parseAiModelIdList(availableModelsText, model)
-    val modelProfile = (if (isManagedFreeProvider) AiProviderPresets.dailyFree else selectedPreset).copy(
+    val modelProfile = selectedPreset.copy(
         defaultModel = model.trim(),
         capabilities = selectedPreset.capabilities.copy(supportsImageInput = supportsVision),
         supportsVision = supportsVision,
         availableModels = configuredModelIds
     )
     val modelOptions = AiProviderPresets.modelOptions(modelProfile)
-    val modelEditable = !isManagedFreeProvider && (modelOptions.isEmpty() || modelUsesCustomInput)
+    val modelEditable = (modelOptions.isEmpty() || modelUsesCustomInput)
     val selectedModelOptionIndex = if (modelUsesCustomInput) {
         modelOptions.size
     } else {
@@ -573,11 +630,7 @@ fun AiImportSettingsSection(
         availableModels = configuredModelIds,
         reasoningEffort = effectiveReasoningEffort
     )
-    val profile = if (isManagedFreeProvider) {
-        selectedPreset.copy(reasoningEffort = effectiveReasoningEffort)
-    } else {
-        editableProfile
-    }
+    val profile = editableProfile
     fun hasCustomProviderDraft(apiKey: String): Boolean = customProviderDraftHasContent(
         name = customProviderName,
         baseUrl = baseUrl,
@@ -729,12 +782,23 @@ fun AiImportSettingsSection(
         contentTopPadding = topPadding,
         contentBottomPadding = DockScrollPadding
     ) {
+        item(key = "ai-specialized-services") {
+            GlassPreferenceSection("语音与提取") {
+                SettingsGroup(backdrop = backdrop, config = visualConfig, modifier = Modifier.fillMaxWidth()) {
+                    SettingsNavigationRow("语音平台与模型", "实时转写、音色、朗读与连接检查",
+                        onClick = { showVoiceSettings = true })
+                    SettingsDivider()
+                    SettingsNavigationRow("待办 AI 提取", "文本和图片提取使用的服务、模型与 API Key",
+                        onClick = { showTodoSettings = true })
+                }
+            }
+        }
         item(key = "ai-provider") {
             GlassPreferenceSection("服务商") {
                 SettingsGroup(backdrop = backdrop, config = state.config, modifier = Modifier.fillMaxWidth()) {
         SettingsInfoRow(
             "AI 设置",
-            "配置AI助理、AI 对话、教务课表解析等智能功能共用的模型服务。API Key 按服务商分别加密保存在本机，不会写入课表数据库或诊断日志。选择“无”可停用所有联网 AI 能力，本地课表功能不受影响。"
+            "配置 AI 助理、AI 对话、教务课表解析共用的模型服务。语音和待办提取在本页分别配置。API Key 加密保存在本机，不会写入备份或诊断日志。主模型选择“无”时停用该模型调用，语音和提取配置仍可独立使用。"
         )
         AiProviderPickerRow(
             value = if (isCustomProvider) customProviderDisplayName else selectedPreset.displayName,
@@ -750,7 +814,7 @@ fun AiImportSettingsSection(
         if (aiDisabled) {
             SettingsDivider()
             SettingsInfoRow(
-                "AI 功能已停用",
+                "AI 尚未配置",
                 "AI助理将使用本地时间与课程模板，AI 对话和 AI 教务解析入口不会发起模型请求。已保存的其他服务商 Key 会保留，重新选择后可继续使用。"
             )
         }
@@ -758,32 +822,7 @@ fun AiImportSettingsSection(
             }
         }
         if (!aiDisabled) {
-        if (isManagedFreeProvider) {
-            item(key = "ai-model-reasoning") {
-                GlassPreferenceSection("模型与推理") {
-                    SettingsGroup(backdrop = backdrop, config = state.config, modifier = Modifier.fillMaxWidth()) {
-            SettingsInfoRow(
-                "需要自备 AI 服务",
-                "此安装包不提供 SleepDown 远程 AI。请选择可用服务商，或配置自己的 API 地址与密钥。"
-            )
-            SleepDownLiquidDropdownPreference(
-                items = reasoningOptions.map(AiReasoningEffort::label),
-                selectedIndex = reasoningOptions.indexOf(effectiveReasoningEffort).coerceAtLeast(0),
-                title = "思考强度",
-                backdrop = backdrop,
-                config = state.config,
-                modifier = Modifier.fillMaxWidth(),
-                insideMargin = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
-                maxHeight = 300.dp,
-                onExpandedChange = {},
-                onSelectedIndexChange = { index ->
-                    reasoningEffort = reasoningOptions[index.coerceIn(reasoningOptions.indices)]
-                }
-            )
-                }
-            }
-        }
-        } else {
+
         item(key = "ai-connection") {
             GlassPreferenceSection("连接与模型") {
                 SettingsGroup(backdrop = backdrop, config = state.config, modifier = Modifier.fillMaxWidth()) {
@@ -919,7 +958,6 @@ fun AiImportSettingsSection(
                 }
             }
         }
-        }
         item(key = "ai-testing") {
             GlassPreferenceSection("测试与管理") {
                 SettingsGroup(backdrop = backdrop, config = state.config, modifier = Modifier.fillMaxWidth()) {
@@ -969,7 +1007,7 @@ fun AiImportSettingsSection(
                 )
             }
         }
-        if (!isManagedFreeProvider) {
+
             SettingsDivider()
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp),
@@ -997,7 +1035,6 @@ fun AiImportSettingsSection(
                     )
                 }
             }
-        }
                 }
             }
         }

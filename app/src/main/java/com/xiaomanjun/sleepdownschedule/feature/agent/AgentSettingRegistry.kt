@@ -63,8 +63,7 @@ object AgentSettingRegistry {
         AgentSettingDefinition("COURSE_CARD_COLORED_TEXT", "课程卡片彩色文字", "true/false", "PERSONALIZATION"),
         AgentSettingDefinition("HOME_CHROME_BLUR_SCALE", "首页玻璃模糊倍数", "0..2小数", "PERSONALIZATION"),
         AgentSettingDefinition("HOME_CHROME_SAMPLING_SCALE", "首页玻璃采样倍数", "0..2小数", "PERSONALIZATION"),
-        AgentSettingDefinition("APP_ICON_STYLE", "应用图标风格", "MINIMAL/KANBAN", "GENERAL"),
-        AgentSettingDefinition("APP_ICON_MODE", "应用图标深浅", "LIGHT/DARK/FOLLOW_DARK_MODE", "GENERAL"),
+        AgentSettingDefinition("APP_ICON_PALETTE", "应用图标配色", "SKY/GREEN/TEAL/PURPLE/ORANGE", "GENERAL"),
         AgentSettingDefinition("DAY_AGENT_ENABLED", "AI助理总开关", "true/false", "DAY_AGENT"),
         AgentSettingDefinition("DAY_AGENT_WEEK_ENABLED", "周视图AI助理", "true/false", "DAY_AGENT"),
         AgentSettingDefinition("DAY_AGENT_WEATHER", "AI助理天气提醒", "true/false", "DAY_AGENT"),
@@ -182,6 +181,7 @@ object AgentSettingRegistry {
         "HOME_CHROME_BLUR_SCALE" to config.homeChromeBlurScale.toString(),
         "HOME_CHROME_SAMPLING_SCALE" to config.homeChromeSamplingScale.toString(),
         "APP_ICON_STYLE" to (context?.let { AppIconManager.currentStyle(it).name } ?: "UNKNOWN"),
+        "APP_ICON_PALETTE" to (context?.let { AppIconManager.currentPalette(it).name } ?: "SKY"),
         "APP_ICON_MODE" to (context?.let { AppIconManager.currentMode(it).name } ?: "UNKNOWN"),
         "COURSE_CARD_PALETTE" to decodeCourseCardPalette(config.courseCardPalette)
             .takeIf { it.isNotEmpty() }
@@ -226,6 +226,7 @@ object AgentSettingRegistry {
             "COURSE_CARD_REFRACTION", "HOME_CHROME_BLUR_SCALE", "HOME_CHROME_SAMPLING_SCALE" ->
                 raw.floatIn(0f, 2f)
             "APP_ICON_STYLE" -> raw.uppercase().takeIf { it in setOf("MINIMAL", "KANBAN") }
+            "APP_ICON_PALETTE" -> raw.uppercase().takeIf { value -> com.xiaomanjun.sleepdownschedule.core.identity.AppIconPalette.entries.any { it.name == value } }
             "APP_ICON_MODE" -> raw.uppercase().takeIf {
                 it in setOf("LIGHT", "DARK", "FOLLOW_DARK_MODE")
             }
@@ -390,9 +391,11 @@ object AgentSettingRegistry {
      * [apply] or [applyPreference]: the latter verifies with a lowercase comparison that would
      * reject the uppercase enum names these keys use.
      */
-    fun isAppIconSetting(key: String?): Boolean = key in setOf("APP_ICON_STYLE", "APP_ICON_MODE")
+    fun isAppIconSetting(key: String?): Boolean = key in setOf("APP_ICON_PALETTE", "APP_ICON_STYLE", "APP_ICON_MODE")
 
     fun applyAppIcon(context: Context, key: String?, value: String?): Boolean = when (key) {
+        "APP_ICON_PALETTE" -> runCatching { com.xiaomanjun.sleepdownschedule.core.identity.AppIconPalette.valueOf(value.orEmpty()) }
+            .getOrNull()?.let { AppIconManager.setPalette(context, it); true } ?: false
         "APP_ICON_STYLE" -> runCatching { AppIconStyle.valueOf(value.orEmpty()) }
             .getOrNull()
             ?.let { AppIconManager.setStyle(context, it); true }
@@ -405,6 +408,7 @@ object AgentSettingRegistry {
     }
 
     fun currentAppIconValue(context: Context, key: String?): String? = when (key) {
+        "APP_ICON_PALETTE" -> AppIconManager.currentPalette(context).name
         "APP_ICON_STYLE" -> AppIconManager.currentStyle(context).name
         "APP_ICON_MODE" -> AppIconManager.currentMode(context).name
         else -> null

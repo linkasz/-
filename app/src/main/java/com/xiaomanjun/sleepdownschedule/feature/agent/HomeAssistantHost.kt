@@ -86,11 +86,11 @@ internal fun HomeAssistantHost(
     val decided = remember(preferencesVersion) { DayAgentPreferences.hasDecision(context) }
     val weatherEnabled = remember(preferencesVersion) { DayAgentPreferences.isWeatherEnabled(context) }
     val repository = remember(context) { DayAgentRepository(context.applicationContext) }
+    val conversationRevision by AgentConversationStore.revision.collectAsStateWithLifecycle()
     val weatherRepository = remember(context) { DayAgentWeatherRepository(context.applicationContext) }
     var weather by remember(weatherEnabled) { mutableStateOf(if (weatherEnabled) DayAgentWeatherStore.load(context) else null) }
     val aiVersion by AiImportSettingsStore.changes.collectAsStateWithLifecycle()
-    val hasAi = remember(aiVersion) { AiImportSettingsStore.resolveAvailableSettings(context) != null ||
-        AiImportSettingsStore.load(context).profile.id == AiProviderPresets.dailyFree.id }
+    val hasAi = remember(aiVersion) { AiImportSettingsStore.resolveAvailableSettings(context) != null }
     DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
@@ -310,7 +310,11 @@ internal fun HomeAssistantHost(
             }
         }
         if (controller.stage == HomeAssistantStage.Conversation && enabled) {
-            key(state.config.id, date) {
+            val conversationKey = remember(state.config.id, date, conversationRevision) {
+                AgentConversationStore.selected(context, state.config.id, date)
+            }
+            key(state.config.id, date, conversationKey, controller.conversationStartsFullScreen,
+                controller.conversationUsesIndependentPage) {
                 val messages by remember(repository, state.config.id, date) {
                     repository.observeMessages(state.config.id, date)
                 }.collectAsStateWithLifecycle(emptyList())
@@ -328,6 +332,7 @@ internal fun HomeAssistantHost(
                     homePresentation = true,
                     homeAnchorBounds = closingAnchor,
                     homeInitiallyFullScreen = controller.conversationStartsFullScreen,
+                    independentPage = controller.conversationUsesIndependentPage,
                     onImportFile = onImportFile
                 )
             }

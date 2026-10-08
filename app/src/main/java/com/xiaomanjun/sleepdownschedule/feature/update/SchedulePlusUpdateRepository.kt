@@ -61,7 +61,7 @@ internal class SchedulePlusUpdateRepository(
     }
 
     fun download(update: SchedulePlusUpdate): File {
-        require(isOwnedReleaseAssetUrl(update.apkUrl, APK_ASSET_NAME)) { "更新 APK 地址不属于课表+ 发布仓库" }
+        require(isOwnedReleaseAssetUrl(update.apkUrl, APK_ASSET_NAME)) { "更新 APK 地址不属于时序清单发布仓库" }
         val directory = File(cacheDirectory, "scheduleplus-updates").apply {
             if (!exists() && !mkdirs()) throw SchedulePlusUpdateException("无法创建更新缓存目录")
         }
@@ -111,7 +111,7 @@ internal class SchedulePlusUpdateRepository(
         val manifestAsset = release.assets.singleOrNull { it.name == MANIFEST_ASSET_NAME }
             ?: throw SchedulePlusUpdateException("此 Release 缺少 $MANIFEST_ASSET_NAME")
         if (!isOwnedReleaseAssetUrl(manifestAsset.url, MANIFEST_ASSET_NAME)) {
-            throw SchedulePlusUpdateException("Release 资产链接不属于课表+ 发布仓库")
+            throw SchedulePlusUpdateException("Release 资产链接不属于时序清单发布仓库")
         }
         return parseUpdateManifest(
             readJson(manifestAsset.url, MANIFEST_JSON_LIMIT),
@@ -202,7 +202,7 @@ internal class SchedulePlusUpdateRepository(
 
     companion object {
         const val OWNER = "linkasz"
-        const val REPOSITORY = "schedule-plus-android"
+        const val REPOSITORY = "-"
         const val MANIFEST_ASSET_NAME = "scheduleplus-update.json"
         const val APK_ASSET_NAME = "app-github-release.apk"
         const val APPLICATION_ID = "com.scheduleplus.student"
@@ -250,7 +250,7 @@ internal class SchedulePlusUpdateRepository(
             val releaseUrl = manifestJson.getString("releaseUrl")
 
             if (!isOwnedReleaseAssetUrl(apkAsset.url, APK_ASSET_NAME)) {
-                throw SchedulePlusUpdateException("Release 资产链接不属于课表+ 发布仓库")
+                throw SchedulePlusUpdateException("Release 资产链接不属于时序清单发布仓库")
             }
             if (applicationId != expectedApplicationId) throw SchedulePlusUpdateException("更新包 applicationId 不匹配")
             if (!VERSION_NAME.matches(versionName) || release.tagName != "v$versionName" || versionCode <= 0L) {

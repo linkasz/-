@@ -5,12 +5,38 @@ import com.xiaomanjun.sleepdownschedule.*
 import com.xiaomanjun.sleepdownschedule.testutil.LocalHttpResponse
 import com.xiaomanjun.sleepdownschedule.testutil.LocalHttpServer
 import java.util.Collections
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.*
 import org.junit.Assert.*
 import org.junit.Test
 
 /** Exercise real request/response continuation without a live model or user credentials. */
 class AgentTaskLoopTest {
+    @Test fun contextEchoIsRepairedOnceWithoutRunningAnotherToolQuery() {
+        runConversation(listOf(
+            response(call("agenda", "GET_DATE_AGENDA")),
+            response(message("[本轮可信时钟] verified_cached_local_facts")),
+            response(message("已拟好明天上午十点的开会待办，请确认。"))
+        ), allowRepair = true) { result, requests, calls ->
+            assertEquals("已拟好明天上午十点的开会待办，请确认。", result)
+            assertEquals(3, requests.size)
+            assertEquals(1, calls.size)
+            assertFalse(requests.last().containsKey("tools"))
+        }
+    }
+    @Test fun asynchronousWeatherResultIsReplayedAndAnsweredInTheSameTurn() {
+        runConversation(listOf(
+            response(call("weather", "weather.quick", """{"city":"长沙","date":"2026-10-01"}""")),
+            response(message("长沙天气查询完成。"))
+        )) { result, requests, calls ->
+            assertEquals("长沙天气查询完成。", result)
+            assertEquals(AgentToolName.WEATHER_QUICK, calls.single().name)
+            val output = requests[1].getValue("input").jsonArray.map { it.jsonObject }
+                .single { it["type"]?.jsonPrimitive?.content == "function_call_output" }
+            assertEquals("weather", output["call_id"]!!.jsonPrimitive.content)
+            assertTrue(output["output"]!!.jsonPrimitive.content.contains("fixture:WEATHER_QUICK"))
+        }
+    }
     @Test fun coldStartCanAnswerWithoutBeingForcedIntoAnotherRequest() {
         val answer = "可按课程、日期或周次描述目标，我会准备可确认的修改。"
         runConversation(listOf(response(message(answer)))) { result, requests, calls ->
@@ -78,8 +104,9 @@ class AgentTaskLoopTest {
 
     private fun runConversation(
         responses: List<String>,
+        allowRepair: Boolean = false,
         verify: (String, List<JsonObject>, List<AgentToolCall>) -> Unit
-    ) {
+    ) = runBlocking {
         val requests = Collections.synchronizedList(mutableListOf<JsonObject>())
         val calls = mutableListOf<AgentToolCall>()
         val deltas = mutableListOf<String>()
@@ -107,8 +134,9 @@ class AgentTaskLoopTest {
                 includeMemoryTool = false,
                 onStatus = {},
                 onDelta = deltas::add,
-                onStreamReset = { fail("Valid task rounds must not reset output") },
+                onStreamReset = { if (!allowRepair) fail("Valid task rounds must not reset output") },
                 executeTool = { call ->
+                    if (call.name == AgentToolName.WEATHER_QUICK) kotlinx.coroutines.delay(5)
                     calls += call
                     AgentToolResult(call.id, call.name, true, "fixture:${call.name}")
                 },

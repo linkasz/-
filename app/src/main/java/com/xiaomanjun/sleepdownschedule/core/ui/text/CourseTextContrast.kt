@@ -17,6 +17,14 @@ internal val LocalCourseTextBackground = compositionLocalOf<CourseTextBackground
 /** The page keeps its current text contrast while cards move under the wallpaper. */
 internal val LocalCourseTextMotionFrozen = compositionLocalOf { false }
 
+/** Local calendar ink uses hysteresis so small wallpaper changes cannot flicker polarity. */
+internal fun localMonochromeTextColor(samples: FloatArray, previous: Color, alpha: Float): Color {
+    val levels = samples.filter { it.isFinite() }.map { it.coerceIn(0f, 1f) }.sorted()
+    if (levels.isEmpty()) return previous.copy(alpha = alpha)
+    val threshold = if (previous.luminance() > .5f) .22f else .16f
+    return (if (levels[levels.size / 2] < threshold) Color.White else Color.Black).copy(alpha = alpha)
+}
+
 /** Keep monochrome text polarity fixed; add a soft opposite-color shadow only where needed. */
 internal fun softTextShadowStrength(
     luminances: FloatArray,

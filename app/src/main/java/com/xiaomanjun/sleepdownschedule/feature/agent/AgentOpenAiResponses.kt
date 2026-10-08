@@ -39,15 +39,16 @@ internal data class AgentResponsesTurn(
  * continuity.
  */
 internal class OpenAiResponsesAgentRunner {
-    fun chat(
+    suspend fun chat(
         settings: AiImportSettings,
         chatMessages: List<JsonObject>,
         includeMemoryTool: Boolean,
         onStatus: (AgentRunStatus) -> Unit,
         onDelta: (String) -> Unit,
         onStreamReset: () -> Unit,
-        executeTool: (AgentToolCall) -> AgentToolResult,
+        executeTool: suspend (AgentToolCall) -> AgentToolResult,
         cachedTools: Set<AgentToolName> = emptySet(),
+        validateAnswer: (String) -> String = { it },
         telemetry: DayAgentTurnTelemetry
     ): String {
         val instructions = chatMessages
@@ -91,23 +92,24 @@ internal class OpenAiResponsesAgentRunner {
                 )
             }
             if (decision.calls.isNotEmpty()) {
-                val note = decision.content.trim().take(120).ifBlank {
-                    "我先调用所需工具确认当前信息，再继续处理。"
-                }
                 onStatus(
                     AgentRunStatus(
                         icon = AgentRunStatusIcon.THINKING,
                         text = "准备下一步",
-                        detail = note
+                        detail = "我先确认当前信息，再为你整理内容。"
                     )
                 )
             }
             // Preserve opaque reasoning even when retrying an empty response without tool calls.
             input += decision.outputItems
             if (decision.calls.isEmpty()) {
+                if (containsAgentContextEcho(decision.content)) return streamFinal(settings, instructions, input,
+                    onStatus, onDelta, onStreamReset, telemetry, validateAnswer, repairOnly = true)
                 usableAgentAnswer(decision.content)?.let { answer ->
-                    onDelta(answer)
-                    return answer
+                    val checked = runCatching { validateAnswer(answer) }.getOrNull()
+                    if (checked != null) { onDelta(checked); return checked }
+                    return streamFinal(settings, instructions, input,
+                        onStatus, onDelta, onStreamReset, telemetry, validateAnswer, repairOnly = true)
                 }
                 if (!outputRetryRequested) {
                     outputRetryRequested = true
@@ -141,6 +143,7 @@ internal class OpenAiResponsesAgentRunner {
             onStatus = onStatus,
             onDelta = onDelta,
             onStreamReset = onStreamReset,
+            validateAnswer = validateAnswer,
             telemetry = telemetry
         )
     }
@@ -152,7 +155,9 @@ internal class OpenAiResponsesAgentRunner {
         onStatus: (AgentRunStatus) -> Unit,
         onDelta: (String) -> Unit,
         onStreamReset: () -> Unit,
-        telemetry: DayAgentTurnTelemetry
+        telemetry: DayAgentTurnTelemetry,
+        validateAnswer: (String) -> String,
+        repairOnly: Boolean = false
     ): String {
         onStatus(AgentRunStatus(AgentRunStatusIcon.THINKING, "整理结果"))
         telemetry.finalAnswerStarted()
@@ -168,8 +173,9 @@ internal class OpenAiResponsesAgentRunner {
             reasoningEffort = settings.profile.reasoningEffort
         )
         return try {
+            if (repairOnly) throw AgentProtocolViolationException()
             telemetry.requestStarted()
-            val gate = AgentFinalOutputGate(onDelta)
+            val gate = AgentFinalOutputGate(onDelta, validate = validateAnswer)
             gate.finish(stream(settings, body, gate::accept, telemetry::recordUsage))
         } catch (error: Throwable) {
             if (error !is MissingResponsesBodyException &&
@@ -182,7 +188,8 @@ internal class OpenAiResponsesAgentRunner {
             onStatus(AgentRunStatus(AgentRunStatusIcon.THINKING, "修正输出格式"))
             val retry = responsesBody(
                 settings = settings,
-                instructions = finalInstructions + "\n\n" + DayAgentPrompts.FinalAnswerProtocolRetry,
+                instructions = finalInstructions + "\n\n" + DayAgentPrompts.FinalAnswerProtocolRetry +
+                    (error as? AgentProtocolViolationException)?.clarification?.let { "\n草稿校验结果：$it" }.orEmpty(),
                 input = input,
                 stream = false,
                 includeTools = false,
@@ -196,11 +203,12 @@ internal class OpenAiResponsesAgentRunner {
             val content = retryTurn.content
                 .takeIf(String::isNotBlank)
                 ?: throw MissingResponsesBodyException()
-            if (containsLeakedAgentFunctionProtocol(content)) {
+            if (containsLeakedAgentFunctionProtocol(content) || containsAgentContextEcho(content)) {
                 throw AgentProtocolViolationException()
             }
-            onDelta(content)
-            content
+            val checked = validateAnswer(content)
+            onDelta(checked)
+            checked
         }
     }
 
@@ -353,7 +361,7 @@ internal fun parseAgentResponsesTurn(response: String): AgentResponsesTurn {
             ?.replace('-', '_')
             ?.uppercase()
             ?: return@mapNotNull null
-        val name = AgentToolName.entries.firstOrNull { it.name == rawName }
+        val name = if (rawName == "WEATHER.QUICK") AgentToolName.WEATHER_QUICK else AgentToolName.entries.firstOrNull { it.name == rawName }
             ?: return@mapNotNull null
         val arguments = item["arguments"]?.jsonPrimitive?.contentOrNull
             ?.let { raw ->

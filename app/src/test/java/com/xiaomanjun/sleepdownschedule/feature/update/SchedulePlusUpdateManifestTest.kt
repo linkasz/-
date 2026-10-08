@@ -15,8 +15,8 @@ class SchedulePlusUpdateManifestTest {
             SchedulePlusUpdateRepository.APPLICATION_ID
         )
 
-        assertEquals("1.2.7", update.versionName)
-        assertEquals(34L, update.versionCode)
+        assertEquals("1.0.1", update.versionName)
+        assertEquals(36L, update.versionCode)
         assertEquals(NOTE, update.releaseNotes)
         assertFalse(update.isPrerelease)
     }
@@ -32,7 +32,7 @@ class SchedulePlusUpdateManifestTest {
         }
         assertThrows(SchedulePlusUpdateException::class.java) {
             SchedulePlusUpdateRepository.parseUpdateManifest(
-                manifest(versionName = "1.2.8"),
+                manifest(versionName = "1.0.2"),
                 stableRelease(),
                 SchedulePlusUpdateRepository.APPLICATION_ID
             )
@@ -42,7 +42,7 @@ class SchedulePlusUpdateManifestTest {
     @Test
     fun rejectsLookalikeHostsAndAssetsWithDifferentSha256() {
         val attackerUrl = "https://github.com.evil.example/${SchedulePlusUpdateRepository.OWNER}/" +
-            "${SchedulePlusUpdateRepository.REPOSITORY}/releases/download/v1.2.7/" +
+            "${SchedulePlusUpdateRepository.REPOSITORY}/releases/download/v1.0.1/" +
             SchedulePlusUpdateRepository.APK_ASSET_NAME
         assertFalse(
             SchedulePlusUpdateRepository.isOwnedReleaseAssetUrl(
@@ -66,21 +66,21 @@ class SchedulePlusUpdateManifestTest {
     @Test
     fun betaManifestMustMatchPrereleaseTagAndStatus() {
         val beta = release(
-            tag = "v1.2.7_beta1",
+            tag = "v1.0.1_beta1",
             prerelease = true,
             apkDigest = "sha256:$HASH"
         )
         val parsed = SchedulePlusUpdateRepository.parseUpdateManifest(
-            manifest(versionName = "1.2.7_beta1", versionCode = 35),
+            manifest(versionName = "1.0.1_beta1", versionCode = 37),
             beta,
             SchedulePlusUpdateRepository.APPLICATION_ID
         )
         assertTrue(parsed.isPrerelease)
-        assertEquals(35L, parsed.versionCode)
+        assertEquals(37L, parsed.versionCode)
 
         assertThrows(SchedulePlusUpdateException::class.java) {
             SchedulePlusUpdateRepository.parseUpdateManifest(
-                manifest(versionName = "1.2.7_beta1", versionCode = 35),
+                manifest(versionName = "1.0.1_beta1", versionCode = 37),
                 stableRelease(),
                 SchedulePlusUpdateRepository.APPLICATION_ID
             )
@@ -89,8 +89,8 @@ class SchedulePlusUpdateManifestTest {
 
     private fun manifest(
         applicationId: String = SchedulePlusUpdateRepository.APPLICATION_ID,
-        versionName: String = "1.2.7",
-        versionCode: Int = 34
+        versionName: String = "1.0.1",
+        versionCode: Int = 36
     ): String {
         val tag = "v$versionName"
         val root = "https://github.com/${SchedulePlusUpdateRepository.OWNER}/" +
@@ -108,7 +108,7 @@ class SchedulePlusUpdateManifestTest {
     }
 
     private fun stableRelease(apkDigest: String = "sha256:$HASH") = release(
-        tag = "v1.2.7",
+        tag = "v1.0.1",
         prerelease = false,
         apkDigest = apkDigest
     )
