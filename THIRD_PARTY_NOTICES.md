@@ -43,7 +43,7 @@ Portions of the liquid glass catalog component code are based on
 
 License: Apache License, Version 2.0.
 
-The code has been modified for SleepDown-Schedule to preserve the app's
+The code has been modified for 时序清单 to preserve the app's
 glass quality controls, fallback behavior, restrained tint values, and local
 interaction styling.
 
@@ -54,7 +54,7 @@ The settings and education-import page structure uses components from
 
 License: Apache License, Version 2.0.
 
-SleepDown-Schedule combines Miuix layout and interaction components with its
+时序清单 combines Miuix layout and interaction components with its
 existing Kyant liquid-glass surfaces and controls. The Miuix blur module is not
 included. The tracked Miuix patches expose surface modifiers, centered dialogs,
 content clipping and popup lifecycle hooks used by those combined surfaces.
