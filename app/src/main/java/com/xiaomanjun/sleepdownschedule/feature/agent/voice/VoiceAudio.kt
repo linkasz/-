@@ -16,6 +16,7 @@ internal class VoiceAudio(private val context: Context, private val scope: Corou
     private var recorder: AudioRecord? = null
     private var echo: AcousticEchoCanceler? = null
     private var recordJob: Job? = null
+    @Volatile private var recordCleanup: Job? = null
     private var playJob: Job? = null
     @Volatile private var track: AudioTrack? = null
     private var queue = Channel<ByteArray>(64)
@@ -27,8 +28,10 @@ internal class VoiceAudio(private val context: Context, private val scope: Corou
     private val attributes = assistantPlaybackAttributes()
 
     @SuppressLint("MissingPermission")
-    fun start(rate: Int, onFrame: (ByteArray, Float) -> Unit, onLostFocus: () -> Unit, onFailure: () -> Unit) {
+    suspend fun start(rate: Int, onFrame: (ByteArray, Float) -> Unit, onLostFocus: () -> Unit, onFailure: () -> Unit) {
         release()
+        recordCleanup?.join()
+        currentCoroutineContext().ensureActive()
         acquireFocus(onLostFocus)
         val minimum = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         require(minimum > 0) { "设备不支持该语音采样率" }
@@ -138,12 +141,35 @@ internal class VoiceAudio(private val context: Context, private val scope: Corou
     }
 
     fun release() {
-        capturedGeneration++; recordJob?.cancel(); recordJob = null
-        runCatching { recorder?.stop() }; runCatching { recorder?.release() }; recorder = null
-        runCatching { echo?.release() }.onFailure { android.util.Log.w("ShixuAudio", "echo_release ${it.javaClass.simpleName}") }; echo = null
+        capturedGeneration++
+        val oldJob = recordJob
+        val oldRecorder = recorder
+        val oldEcho = echo
+        recordJob = null; recorder = null; echo = null
+        oldJob?.cancel()
+        runCatching { oldRecorder?.stop() }
+        if (oldJob != null || oldRecorder != null || oldEcho != null) {
+            recordCleanup = releaseAfterVoiceJob(oldJob) {
+                runCatching { oldRecorder?.release() }
+                runCatching { oldEcho?.release() }.onFailure {
+                    android.util.Log.w("ShixuAudio", "echo_release ${it.javaClass.simpleName}")
+                }
+            }
+        }
         interrupt()
         focus?.let { request -> runCatching { manager.abandonAudioFocusRequest(request) } }; focus = null
     }
+}
+
+/** Keep a blocking native read's resource alive until its owning coroutine has exited. */
+internal fun releaseAfterVoiceJob(job: Job?, release: () -> Unit): Job {
+    val cleanup = CompletableDeferred<Unit>()
+    val finish = {
+        try { release() } finally { cleanup.complete(Unit) }
+        Unit
+    }
+    if (job == null) finish() else job.invokeOnCompletion { finish() }
+    return cleanup
 }
 
 internal fun pcmLevel(bytes: ByteArray): Float {

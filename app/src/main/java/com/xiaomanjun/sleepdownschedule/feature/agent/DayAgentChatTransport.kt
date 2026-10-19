@@ -13,6 +13,10 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import java.net.HttpURLConnection
 import java.net.URL
+import kotlinx.coroutines.DisposableHandle
+import kotlinx.coroutines.InternalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 
 private val AgentChatJson = Json { ignoreUnknownKeys = true; isLenient = true }
 
@@ -34,23 +38,34 @@ internal fun AiImportSettings.usesDeepSeekChatEndpoint(): Boolean =
  * serialization, authentication, HTTP, and streaming response normalization.
  */
 internal class DayAgentChatTransport {
-    fun post(settings: AiImportSettings, body: String): String {
-        val connection = openConnection(settings, body)
+    @OptIn(InternalCoroutinesApi::class)
+    fun post(settings: AiImportSettings, body: String, job: Job? = null): String {
+        val request = openConnection(settings, body, job)
+        val connection = request.connection
         return try {
-            connection.readResponse(settings.profile.id)
+            job?.ensureActive()
+            connection.readResponse(settings.profile.id).also { job?.ensureActive() }
+        } catch (error: Throwable) {
+            job?.ensureActive()
+            throw error
         } finally {
-            connection.disconnect()
+            request.cancellation?.dispose()
+            runCatching { connection.disconnect() }
         }
     }
 
+    @OptIn(InternalCoroutinesApi::class)
     fun stream(
         settings: AiImportSettings,
         body: String,
         onDelta: (String) -> Unit,
-        onUsage: (AgentTokenUsage) -> Unit
+        onUsage: (AgentTokenUsage) -> Unit,
+        job: Job? = null
     ): String {
-        val connection = openConnection(settings, body)
+        val request = openConnection(settings, body, job)
+        val connection = request.connection
         return try {
+            job?.ensureActive()
             val code = connection.responseCode
             if (code !in 200..299) {
                 val error = connection.errorStream
@@ -62,17 +77,23 @@ internal class DayAgentChatTransport {
             }
             if (!connection.contentType.orEmpty().contains("text/event-stream", ignoreCase = true)) {
                 val response = connection.inputStream.bufferedReader().use { it.readText() }
+                job?.ensureActive()
                 onUsage(parseAgentTokenUsage(response))
                 val content = parseFullChatContent(response)
+                job?.ensureActive()
                 onDelta(content)
                 content
             } else {
                 val result = StringBuilder()
                 var hasFinalContent = false
                 connection.forEachSseDataLine { data ->
+                    job?.ensureActive()
                     val event = parseSseJsonObject(data) ?: return@forEachSseDataLine
                     val usage = agentTokenUsage(event)
-                    if (!usage.isEmpty) onUsage(usage)
+                    if (!usage.isEmpty) {
+                        job?.ensureActive()
+                        onUsage(usage)
+                    }
                     val content = runCatching {
                         val choice = event["choices"]
                             ?.jsonArray
@@ -84,16 +105,22 @@ internal class DayAgentChatTransport {
                             .ifBlank { agentTextFromJson(choice["text"]) }
                     }.getOrNull().orEmpty()
                     if (content.isNotEmpty()) {
+                        job?.ensureActive()
                         hasFinalContent = true
                         result.append(content)
                         onDelta(content)
                     }
                 }
+                job?.ensureActive()
                 if (!hasFinalContent) throw MissingAgentBodyException()
                 result.toString()
             }
+        } catch (error: Throwable) {
+            job?.ensureActive()
+            throw error
         } finally {
-            connection.disconnect()
+            request.cancellation?.dispose()
+            runCatching { connection.disconnect() }
         }
     }
 
@@ -159,10 +186,13 @@ internal class DayAgentChatTransport {
         }
     }.toString()
 
+    @OptIn(InternalCoroutinesApi::class)
     private fun openConnection(
         settings: AiImportSettings,
-        body: String
-    ): HttpURLConnection {
+        body: String,
+        job: Job?
+    ): ChatCancellableConnection {
+        job?.ensureActive()
         val path = settings.profile.chatCompletionsPath.trim('/')
         val base = if (path.isEmpty()) {
             // 未显式配置路径：直接使用下发的完整地址，不再 normalize 剥掉 /chat/completions 等后缀
@@ -177,10 +207,23 @@ internal class DayAgentChatTransport {
             contentType = "application/json; charset=utf-8",
             accept = null
         )
-        connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
-        return connection
+        val cancellation = job?.let { connection.disconnectAgentRequestOnCancellation(it) }
+        try {
+            connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+            return ChatCancellableConnection(connection, cancellation)
+        } catch (error: Throwable) {
+            cancellation?.dispose()
+            runCatching { connection.disconnect() }
+            job?.ensureActive()
+            throw error
+        }
     }
 }
+
+private data class ChatCancellableConnection(
+    val connection: HttpURLConnection,
+    val cancellation: DisposableHandle?
+)
 
 internal fun parseFullChatContent(response: String): String {
     val root = AgentChatJson.parseToJsonElement(response).jsonObject

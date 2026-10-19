@@ -15,6 +15,9 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
@@ -418,6 +421,7 @@ class DayAgentService(private val context: Context) {
         onStreamReset: () -> Unit = {},
         traceId: String = UUID.randomUUID().toString()
     ): String = withContext(Dispatchers.IO) {
+        val requestJob = currentCoroutineContext().job
         ambiguousAgentTimeQuestion(question)?.let { clarification ->
             onDelta(clarification)
             return@withContext clarification
@@ -613,7 +617,7 @@ class DayAgentService(private val context: Context) {
                         excludedTools = completedOneShotTools
                     )
                     telemetry.requestStarted()
-                    val response = chatTransport.post(settings, decisionBody)
+                    val response = chatTransport.post(settings, decisionBody, requestJob)
                     val parsed = parseAgentToolDecision(
                         response = response,
                         allowProviderWebSearchCall = miMoWebSearchAvailable
@@ -716,7 +720,7 @@ class DayAgentService(private val context: Context) {
      * Bounded convergence when the task loop exhausts its reads or cannot produce valid output.
      * Normal task rounds can already return a complete answer with an optional proposed plan.
      */
-    private fun streamFinalAnswer(
+    private suspend fun streamFinalAnswer(
         settings: AiImportSettings,
         messages: List<JsonObject>,
         onStatus: (AgentRunStatus) -> Unit,
@@ -726,6 +730,8 @@ class DayAgentService(private val context: Context) {
         validateAnswer: (String) -> String,
         repairOnly: Boolean = false
     ): String {
+        val requestJob = currentCoroutineContext().job
+        requestJob.ensureActive()
         onStatus(AgentRunStatus(AgentRunStatusIcon.THINKING, "整理结果"))
         telemetry.finalAnswerStarted()
         val finalMessages = messages + agentTextMessage(
@@ -747,10 +753,12 @@ class DayAgentService(private val context: Context) {
                     settings = settings,
                     body = finalBody,
                     onDelta = gate::accept,
-                    onUsage = telemetry::recordUsage
+                    onUsage = telemetry::recordUsage,
+                    job = requestJob
                 )
             )
         } catch (error: Throwable) {
+            requestJob.ensureActive()
             if (error !is MissingAgentBodyException && error !is AgentProtocolViolationException) {
                 throw error
             }
@@ -768,7 +776,7 @@ class DayAgentService(private val context: Context) {
                 includeTools = false
             )
             telemetry.requestStarted()
-            val retryResponse = chatTransport.post(settings, retryBody)
+            val retryResponse = chatTransport.post(settings, retryBody, requestJob)
             telemetry.recordUsage(parseAgentTokenUsage(retryResponse))
             val retryContent = parseFullChatContent(retryResponse)
             if (containsLeakedAgentFunctionProtocol(retryContent) || containsAgentContextEcho(retryContent)) {
@@ -984,6 +992,7 @@ class DayAgentRepository(private val context: Context) {
             val cleanAnswer = sanitizeAgentToolOutput(answer)
                 .takeIf(String::isNotBlank)
                 ?: throw IllegalStateException("AI 没有返回可显示的最终答复，请重试")
+            currentCoroutineContext().ensureActive()
             dao.insertMessage(
                 AgentMessageEntity(
                     scheduleId = scheduleId,

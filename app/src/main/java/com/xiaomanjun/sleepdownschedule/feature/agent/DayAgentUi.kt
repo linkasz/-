@@ -1323,12 +1323,17 @@ internal fun DayAgentConversationDialog(
                         actionFeedback = actionFeedback + (actionKey to AgentPlanExecutionResult(false, null, false,
                             checked.validationIssues.joinToString("\n")))
                     } else {
-                        AgentCreationDispatch.submit(dialogContext, state.config.id, facts.date, actionKey, AgentPlan(checked.actions)) { savingPlan, onResult ->
-                            onAgentAction(savingPlan) { result ->
-                                onResult(result)
+                        AgentCreationDispatch.submit(
+                            context = dialogContext,
+                            scheduleId = state.config.id,
+                            date = facts.date,
+                            actionKey = actionKey,
+                            plan = AgentPlan(checked.actions),
+                            onComplete = { result ->
                                 if (result.success && result.verified) speakCreationResult("已创建。${result.message}")
-                            }
-                        }
+                            },
+                            handler = onAgentAction
+                        )
                     }
                 }
             })

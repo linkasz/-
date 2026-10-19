@@ -22,7 +22,7 @@ internal class VoicePreviewPlayer(context: Context, scope: CoroutineScope) {
         val token = epoch
         owner = currentCoroutineContext()[Job]
         try {
-            audio.acquireFocus { stop() }
+            audio.acquireFocus { if (epoch == token) stop() }
             if (voice.sampleUrl != null) withContext(Dispatchers.Main) {
                 suspendCancellableCoroutine<Unit> { continuation ->
                     val p = MediaPlayer(); player = p
@@ -41,7 +41,7 @@ internal class VoicePreviewPlayer(context: Context, scope: CoroutineScope) {
             } else {
                 settings.validated()
                 AliyunTtsClient.stream(settings.copy(ttsVoice = voice.id), "你好，我是时序清单的智能助理。现在为你试听这个音色。",
-                    { call = it }, { response = it }, { audio.play(it, { stop() }) })
+                    { call = it }, { response = it }, { audio.play(it, { if (epoch == token) stop() }) })
                 audio.finishPlayback()
             }
         } finally { if (epoch == token) { owner = null; stop() } }

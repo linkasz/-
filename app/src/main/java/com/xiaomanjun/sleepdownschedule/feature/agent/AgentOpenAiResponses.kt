@@ -8,6 +8,13 @@ import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.concurrent.CancellationException
+import kotlinx.coroutines.DisposableHandle
+import kotlinx.coroutines.InternalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.job
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -39,6 +46,7 @@ internal data class AgentResponsesTurn(
  * continuity.
  */
 internal class OpenAiResponsesAgentRunner {
+    @OptIn(InternalCoroutinesApi::class)
     suspend fun chat(
         settings: AiImportSettings,
         chatMessages: List<JsonObject>,
@@ -51,6 +59,7 @@ internal class OpenAiResponsesAgentRunner {
         validateAnswer: (String) -> String = { it },
         telemetry: DayAgentTurnTelemetry
     ): String {
+        val job = currentCoroutineContext().job
         val instructions = chatMessages
             .filter { it["role"]?.jsonPrimitive?.contentOrNull == "system" }
             .mapNotNull { it["content"]?.jsonPrimitive?.contentOrNull }
@@ -64,6 +73,7 @@ internal class OpenAiResponsesAgentRunner {
         var outputRetryRequested = false
 
         toolRounds@ for (round in 0 until MaxAgentToolRounds) {
+            job.ensureActive()
             onStatus(AgentRunStatus(AgentRunStatusIcon.THINKING, "正在思考"))
             telemetry.requestStarted()
             val decision = parseAgentResponsesTurn(
@@ -81,9 +91,11 @@ internal class OpenAiResponsesAgentRunner {
                         includeMemoryTool = includeMemoryTool,
                         excludedTools = completedOneShotTools,
                         reasoningEffort = settings.profile.reasoningEffort
-                    )
+                    ),
+                    job
                 )
             )
+            job.ensureActive()
             telemetry.recordUsage(decision.usage)
             telemetry.recordDecisionRound(decision.calls.size)
             if (decision.unparsedToolCallCount > 0) {
@@ -104,12 +116,16 @@ internal class OpenAiResponsesAgentRunner {
             input += decision.outputItems
             if (decision.calls.isEmpty()) {
                 if (containsAgentContextEcho(decision.content)) return streamFinal(settings, instructions, input,
-                    onStatus, onDelta, onStreamReset, telemetry, validateAnswer, repairOnly = true)
+                    onStatus, onDelta, onStreamReset, telemetry, validateAnswer, job, repairOnly = true)
                 usableAgentAnswer(decision.content)?.let { answer ->
                     val checked = runCatching { validateAnswer(answer) }.getOrNull()
-                    if (checked != null) { onDelta(checked); return checked }
+                    if (checked != null) {
+                        job.ensureActive()
+                        onDelta(checked)
+                        return checked
+                    }
                     return streamFinal(settings, instructions, input,
-                        onStatus, onDelta, onStreamReset, telemetry, validateAnswer, repairOnly = true)
+                        onStatus, onDelta, onStreamReset, telemetry, validateAnswer, job, repairOnly = true)
                 }
                 if (!outputRetryRequested) {
                     outputRetryRequested = true
@@ -119,8 +135,10 @@ internal class OpenAiResponsesAgentRunner {
             }
 
             val results = decision.calls.map { call ->
+                job.ensureActive()
                 onStatus(call.name.runStatus())
                 val result = executeTool(call)
+                job.ensureActive()
                 input += buildJsonObject {
                     put("type", "function_call_output")
                     put("call_id", result.callId)
@@ -144,10 +162,12 @@ internal class OpenAiResponsesAgentRunner {
             onDelta = onDelta,
             onStreamReset = onStreamReset,
             validateAnswer = validateAnswer,
-            telemetry = telemetry
+            telemetry = telemetry,
+            job = job
         )
     }
 
+    @OptIn(InternalCoroutinesApi::class)
     private fun streamFinal(
         settings: AiImportSettings,
         instructions: String,
@@ -157,8 +177,10 @@ internal class OpenAiResponsesAgentRunner {
         onStreamReset: () -> Unit,
         telemetry: DayAgentTurnTelemetry,
         validateAnswer: (String) -> String,
+        job: Job,
         repairOnly: Boolean = false
     ): String {
+        job.ensureActive()
         onStatus(AgentRunStatus(AgentRunStatusIcon.THINKING, "整理结果"))
         telemetry.finalAnswerStarted()
         val finalInstructions = instructions + "\n\n" + DayAgentPrompts.FinalAnswerStage
@@ -173,15 +195,14 @@ internal class OpenAiResponsesAgentRunner {
             reasoningEffort = settings.profile.reasoningEffort
         )
         return try {
+            job.ensureActive()
             if (repairOnly) throw AgentProtocolViolationException()
             telemetry.requestStarted()
             val gate = AgentFinalOutputGate(onDelta, validate = validateAnswer)
-            gate.finish(stream(settings, body, gate::accept, telemetry::recordUsage))
+            gate.finish(stream(settings, body, gate::accept, telemetry::recordUsage, job))
         } catch (error: Throwable) {
-            if (error !is MissingResponsesBodyException &&
-                error !is MissingAgentBodyException &&
-                error !is AgentProtocolViolationException
-            ) {
+            job.ensureActive()
+            if (!error.isFinalAnswerRepairable()) {
                 throw error
             }
             onStreamReset()
@@ -197,8 +218,10 @@ internal class OpenAiResponsesAgentRunner {
                 excludedTools = emptySet(),
                 reasoningEffort = settings.profile.reasoningEffort
             )
+            job.ensureActive()
             telemetry.requestStarted()
-            val retryTurn = parseAgentResponsesTurn(post(settings, retry))
+            val retryTurn = parseAgentResponsesTurn(post(settings, retry, job))
+            job.ensureActive()
             telemetry.recordUsage(retryTurn.usage)
             val content = retryTurn.content
                 .takeIf(String::isNotBlank)
@@ -207,6 +230,7 @@ internal class OpenAiResponsesAgentRunner {
                 throw AgentProtocolViolationException()
             }
             val checked = validateAnswer(content)
+            job.ensureActive()
             onDelta(checked)
             checked
         }
@@ -242,58 +266,87 @@ internal class OpenAiResponsesAgentRunner {
         }
     }
 
-    private fun post(settings: AiImportSettings, body: JsonObject): String {
-        val connection = open(settings, body)
-        val code = connection.responseCode
-        val source = if (code in 200..299) connection.inputStream else connection.errorStream
-        val response = source?.bufferedReader()?.use { it.readText() }.orEmpty()
-        connection.disconnect()
-        if (code !in 200..299) {
-            throw IllegalStateException(formatAiRequestError(code, response, settings.profile.id))
+    @OptIn(InternalCoroutinesApi::class)
+    private fun post(settings: AiImportSettings, body: JsonObject, job: Job): String {
+        val request = open(settings, body, job)
+        val connection = request.connection
+        return try {
+            job.ensureActive()
+            val code = connection.responseCode
+            val source = if (code in 200..299) connection.inputStream else connection.errorStream
+            val response = source?.bufferedReader()?.use { it.readText() }.orEmpty()
+            job.ensureActive()
+            if (code !in 200..299) {
+                throw IllegalStateException(formatAiRequestError(code, response, settings.profile.id))
+            }
+            response
+        } catch (error: Throwable) {
+            job.ensureActive()
+            throw error
+        } finally {
+            request.cancellation.dispose()
+            runCatching { connection.disconnect() }
         }
-        return response
     }
 
     private fun stream(
         settings: AiImportSettings,
         body: JsonObject,
         onDelta: (String) -> Unit,
-        onUsage: (AgentTokenUsage) -> Unit
+        onUsage: (AgentTokenUsage) -> Unit,
+        job: Job
     ): String {
-        val connection = open(settings, body)
-        val code = connection.responseCode
-        if (code !in 200..299) {
-            val error = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
-            connection.disconnect()
-            throw IllegalStateException(formatAiRequestError(code, error, settings.profile.id))
-        }
-        if (!connection.contentType.orEmpty().contains("text/event-stream", ignoreCase = true)) {
-            val response = connection.inputStream.bufferedReader().use { it.readText() }
-            connection.disconnect()
-            val turn = parseAgentResponsesTurn(response)
-            onUsage(turn.usage)
-            val content = turn.content
-                .takeIf(String::isNotBlank)
-                ?: throw MissingResponsesBodyException()
-            onDelta(content)
-            return content
-        }
-
-        val result = AgentResponsesTextAccumulator()
+        val request = open(settings, body, job)
+        val connection = request.connection
         try {
-        connection.forEachSseDataLine { data ->
-            val event = parseSseJsonObject(data) ?: return@forEachSseDataLine
-            val usage = agentTokenUsage(event)
-            if (!usage.isEmpty) onUsage(usage)
-            result.consume(event).takeIf(String::isNotEmpty)?.let(onDelta)
-        }
-        return result.finish()
+            job.ensureActive()
+            val code = connection.responseCode
+            if (code !in 200..299) {
+                val error = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                throw IllegalStateException(formatAiRequestError(code, error, settings.profile.id))
+            }
+            if (!connection.contentType.orEmpty().contains("text/event-stream", ignoreCase = true)) {
+                val response = connection.inputStream.bufferedReader().use { it.readText() }
+                job.ensureActive()
+                val turn = parseAgentResponsesTurn(response)
+                job.ensureActive()
+                onUsage(turn.usage)
+                val content = turn.content
+                    .takeIf(String::isNotBlank)
+                    ?: throw MissingResponsesBodyException()
+                job.ensureActive()
+                onDelta(content)
+                return content
+            }
+
+            val result = AgentResponsesTextAccumulator()
+            connection.forEachSseDataLine { data ->
+                job.ensureActive()
+                val event = parseSseJsonObject(data) ?: return@forEachSseDataLine
+                val usage = agentTokenUsage(event)
+                if (!usage.isEmpty) {
+                    job.ensureActive()
+                    onUsage(usage)
+                }
+                result.consume(event).takeIf(String::isNotEmpty)?.let { delta ->
+                    job.ensureActive()
+                    onDelta(delta)
+                }
+            }
+            job.ensureActive()
+            return result.finish()
+        } catch (error: Throwable) {
+            job.ensureActive()
+            throw error
         } finally {
-            connection.disconnect()
+            request.cancellation.dispose()
+            runCatching { connection.disconnect() }
         }
     }
 
-    private fun open(settings: AiImportSettings, body: JsonObject): HttpURLConnection {
+    @OptIn(InternalCoroutinesApi::class)
+    private fun open(settings: AiImportSettings, body: JsonObject, job: Job): AgentCancellableConnection {
+        job.ensureActive()
         val path = settings.profile.responsesPath.trim('/')
         val base = if (path.isEmpty()) {
             // 未显式配置路径：直接使用下发的完整地址，不再 normalize 剥掉 /responses 等后缀
@@ -302,17 +355,43 @@ internal class OpenAiResponsesAgentRunner {
             normalizeAiBaseUrlForProvider(settings.profile.id, settings.profile.baseUrl).trimEnd('/')
         }
         val endpoint = if (path.isEmpty()) base else "$base/$path"
-        return openAiPostConnection(
+        val connection = openAiPostConnection(
             url = endpoint,
             apiKey = settings.apiKey,
             authType = settings.profile.authType,
             contentType = "application/json; charset=utf-8",
             accept = null
-        ).apply {
-            outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+        )
+        val cancellation = connection.disconnectAgentRequestOnCancellation(job)
+        try {
+            connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+            return AgentCancellableConnection(connection, cancellation)
+        } catch (error: Throwable) {
+            cancellation.dispose()
+            runCatching { connection.disconnect() }
+            job.ensureActive()
+            throw error
         }
     }
 }
+
+private data class AgentCancellableConnection(
+    val connection: HttpURLConnection,
+    val cancellation: DisposableHandle
+)
+
+@OptIn(InternalCoroutinesApi::class)
+internal fun HttpURLConnection.disconnectAgentRequestOnCancellation(job: Job): DisposableHandle =
+    job.invokeOnCompletion(onCancelling = true, invokeImmediately = true) { cause ->
+        if (cause is CancellationException) runCatching { disconnect() }
+    }
+
+internal fun Throwable.isFinalAnswerRepairable(): Boolean =
+    this !is CancellationException && (
+        this is MissingResponsesBodyException ||
+            this is MissingAgentBodyException ||
+            this is AgentProtocolViolationException
+        )
 
 private fun toResponsesInputMessage(message: JsonObject): JsonObject {
     val role = message["role"]?.jsonPrimitive?.contentOrNull ?: "user"
@@ -434,4 +513,4 @@ internal class AgentResponsesTextAccumulator {
     fun finish(): String = text.toString().takeIf(String::isNotBlank) ?: throw MissingResponsesBodyException()
 }
 
-private class MissingResponsesBodyException : IllegalStateException("AI 没有返回最终正文")
+internal class MissingResponsesBodyException : IllegalStateException("AI 没有返回最终正文")

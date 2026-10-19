@@ -12,6 +12,7 @@ import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.util.Locale
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.*
@@ -68,6 +69,7 @@ internal class VoiceSession(
     @Volatile private var synthesisCall: Call? = null
     @Volatile private var synthesisResponse: Response? = null
     private var ttsAnswer: String? = null
+    private var ttsAnswerTurn: Long? = null
     private var lastReadback: String? = null
     @Volatile private var generation = 0L
     @Volatile private var turnGeneration = 0L
@@ -346,7 +348,7 @@ internal class VoiceSession(
     private fun submitFinal(question: String, callId: String? = null) {
         cancelReplyTrace()
         turnJob?.cancel(); synthesisCall?.cancel(); synthesisResponse?.close()
-        audio.interrupt(); tts?.stop(); ttsAnswer = null; cancelNativeResponse()
+        audio.interrupt(); runCatching { tts?.stop() }; ttsAnswer = null; ttsAnswerTurn = null; cancelNativeResponse()
         turnJob = scope.launch {
             try { answer(question, callId) }
             catch (cancelled: CancellationException) { throw cancelled }
@@ -403,7 +405,8 @@ internal class VoiceSession(
             }
             VoicePlatform.SYSTEM -> {
                 initializeSystemTts()
-                if (ttsReady) speakSystem(speechPlainText(reply)) else ttsAnswer = speechPlainText(reply)
+                if (ttsReady) speakSystem(speechPlainText(reply), turn)
+                else { ttsAnswer = speechPlainText(reply); ttsAnswerTurn = turn }
             }
             VoicePlatform.ALIYUN -> {
                 synthesizeAliyun(speechPlainText(reply))
@@ -412,7 +415,8 @@ internal class VoiceSession(
             }
             else -> {
                 initializeSystemTts()
-                if (ttsReady) speakSystem(speechPlainText(reply)) else ttsAnswer = speechPlainText(reply)
+                if (ttsReady) speakSystem(speechPlainText(reply), turn)
+                else { ttsAnswer = speechPlainText(reply); ttsAnswerTurn = turn }
             }
         }
         } catch (e: CancellationException) { throw e }
@@ -421,7 +425,7 @@ internal class VoiceSession(
 
     private fun readbackFailed() {
         synthesisCall?.cancel(); runCatching { synthesisResponse?.close() }; synthesisCall = null; synthesisResponse = null
-        audio.interrupt(); tts?.stop(); ttsAnswer = null
+        audio.interrupt(); runCatching { tts?.stop() }; ttsAnswer = null; ttsAnswerTurn = null
         mutable.value = mutable.value.copy(phase = VoicePhase.LISTENING, level = 0f,
             error = if (lastReadback != null) "回复已显示，朗读失败。点击此处或语音按钮重试朗读。" else "系统朗读暂时不可用，可继续语音或文字输入。",
             canRetryReadback = lastReadback != null)
@@ -525,43 +529,69 @@ internal class VoiceSession(
     private fun initializeSystemTts() {
         if (tts != null) return
         val current = generation
-        tts = TextToSpeech(context) { status ->
-            scope.launch {
-                if (generation != current) return@launch
-                if (status != TextToSpeech.SUCCESS) { tts?.shutdown(); tts = null; readbackFailed() }
-                else {
-                    val language = tts?.setLanguage(Locale.SIMPLIFIED_CHINESE)
-                    if (language == null || language < TextToSpeech.LANG_AVAILABLE) {
-                        tts?.shutdown(); tts = null; readbackFailed()
-                        return@launch
-                    }
-                    ttsReady = true
+        val engineRef = AtomicReference<TextToSpeech?>()
+        val engine = TextToSpeech(context) { status ->
+            scope.launch(Dispatchers.Main) {
+                val engine = engineRef.get() ?: return@launch
+                if (generation != current || tts !== engine) return@launch
+                try {
+                    check(status == TextToSpeech.SUCCESS) { "系统朗读初始化失败" }
+                    val language = engine.setLanguage(Locale.SIMPLIFIED_CHINESE)
+                    check(language >= TextToSpeech.LANG_AVAILABLE) { "系统朗读语言不可用" }
                     // System TTS follows the same media/loudspeaker policy as cloud playback.
-                    tts?.setAudioAttributes(assistantPlaybackAttributes())
-                    tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                    engine.setAudioAttributes(assistantPlaybackAttributes())
+                    engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                         override fun onStart(utteranceId: String?) = Unit
                         override fun onAudioAvailable(utteranceId: String?, audio: ByteArray?) {
-                            if (generation == current && utteranceId == turnGeneration.toString() && audio != null) {
+                            if (generation == current && tts === engine &&
+                                utteranceId == turnGeneration.toString() && audio != null) {
                                 mutable.update { it.copy(level = pcmLevel(audio)) }
                             }
                         }
                         override fun onDone(utteranceId: String?) { scope.launch {
-                            if (generation == current && utteranceId == turnGeneration.toString()) {
-                                completeSpeech(current, turnGeneration)
+                            val utteranceTurn = utteranceId?.toLongOrNull() ?: return@launch
+                            if (generation == current && tts === engine && utteranceTurn == turnGeneration) {
+                                try {
+                                    completeSpeech(current, utteranceTurn)
+                                } catch (cancelled: CancellationException) {
+                                    throw cancelled
+                                } catch (_: Exception) {
+                                    readbackFailed()
+                                }
                             }
                         } }
                         override fun onError(utteranceId: String?) { scope.launch {
-                            if (generation == current && utteranceId == turnGeneration.toString()) readbackFailed()
+                            if (generation == current && tts === engine && utteranceId == turnGeneration.toString()) readbackFailed()
                         } }
                     })
-                    ttsAnswer?.let { speakSystem(it) }; ttsAnswer = null
+                    ttsReady = true
+                    val pendingAnswer = ttsAnswer
+                    val pendingTurn = ttsAnswerTurn
+                    ttsAnswer = null; ttsAnswerTurn = null
+                    if (pendingAnswer != null && pendingTurn != null && pendingTurn == turnGeneration &&
+                        mutable.value.phase == VoicePhase.SPEAKING) {
+                        speakSystem(pendingAnswer, pendingTurn)
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    if (generation == current && tts === engine) {
+                        ttsReady = false
+                        tts = null
+                        runCatching { engine.stop() }; runCatching { engine.shutdown() }
+                        ttsAnswer = null; ttsAnswerTurn = null
+                        readbackFailed()
+                    }
                 }
             }
         }
+        engineRef.set(engine)
+        tts = engine
     }
 
-    private fun speakSystem(answer: String) {
-        check(tts?.speak(answer, TextToSpeech.QUEUE_FLUSH, null, turnGeneration.toString()) == TextToSpeech.SUCCESS) { "系统朗读失败" }
+    private fun speakSystem(answer: String, turn: Long) {
+        val engine = tts ?: error("系统朗读不可用")
+        check(engine.speak(answer, TextToSpeech.QUEUE_FLUSH, null, turn.toString()) == TextToSpeech.SUCCESS) { "系统朗读失败" }
     }
 
     private fun listenSystem() {
@@ -601,7 +631,7 @@ internal class VoiceSession(
         nativeBridge?.let { scope.launch(NonCancellable) { it.abandon(abandoned) } }
         cancelNativeResponse()
         protocol?.takeUnless { it.transcriptionOnly }?.let { websocket?.send(it.clear()) }; manualTurn?.reset()
-        audio.interrupt(); runCatching { tts?.stop() }; ttsAnswer = null; resetSegment()
+        audio.interrupt(); runCatching { tts?.stop() }; ttsAnswer = null; ttsAnswerTurn = null; resetSegment()
         mutable.value = mutable.value.copy(phase = VoicePhase.LISTENING, level = 0f)
         if (settings.platform == VoicePlatform.SYSTEM) {
             try { recognizer?.cancel(); listenSystem() }
@@ -622,7 +652,7 @@ internal class VoiceSession(
         manualTurn?.reset(); manualTurn = null
         nativeResponses.reset(); nativeTools.clear(); nativeText.setLength(0); nativeInstructions = ""
         audio.release(); runCatching { recognizer?.destroy() }; recognizer = null
-        runCatching { tts?.stop() }; runCatching { tts?.shutdown() }; tts = null; ttsReady = false; ttsAnswer = null
+        runCatching { tts?.stop() }; runCatching { tts?.shutdown() }; tts = null; ttsReady = false; ttsAnswer = null; ttsAnswerTurn = null
         resetSegment(); seenInput = false
         mutable.value = VoiceSessionState(if (error == null) VoicePhase.OFF else VoicePhase.ERROR, error = error)
         lastReadback = null
