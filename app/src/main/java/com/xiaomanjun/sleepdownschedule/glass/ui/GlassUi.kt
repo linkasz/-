@@ -741,7 +741,9 @@ fun GlassSurface(
                 }
             }
         }
-    Box(modifier = contentModifier.then(lightModifier)) {
+    val finishModifier = if (interactive && enabled && shapeProvider == null && morphAllocation == null)
+        Modifier.controlSurfaceFinish(shape, lightGlass) { pressProgress } else Modifier
+    Box(modifier = contentModifier.then(finishModifier).then(lightModifier)) {
         CompositionLocalProvider(LocalGlassAppearance provides appearance,
             androidx.compose.material3.LocalContentColor provides appearance.foreground) {
             content()

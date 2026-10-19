@@ -7,6 +7,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.luminance
 import com.xiaomanjun.sleepdownschedule.core.ui.text.CourseTextBackground
+import com.xiaomanjun.sleepdownschedule.core.ui.text.courseTextBlurMix
 import com.xiaomanjun.sleepdownschedule.core.ui.text.LocalCourseTextMotionFrozen
 import com.xiaomanjun.sleepdownschedule.feature.home.LocalHomeBackgroundFrozen
 import com.xiaomanjun.sleepdownschedule.feature.home.LocalHomeTextContrastFrozen
@@ -51,11 +52,12 @@ internal fun rememberCourseTextBackground(
                 av + (bv - av) * ((fraction - a) / (b - a))
             } else 1f
             val tint = base.copy(alpha = (tintAlpha * tintWeight).coerceIn(0f, 1f))
+            val blurMix = courseTextBlurMix(blurred, blurPx, bounds.height)
             colors.map { source ->
-                val softened = if (blurred) Color(
-                    source.red * 0.3f + mean.red * 0.7f,
-                    source.green * 0.3f + mean.green * 0.7f,
-                    source.blue * 0.3f + mean.blue * 0.7f
+                val softened = if (blurMix > 0f) Color(
+                    source.red * (1f - blurMix) + mean.red * blurMix,
+                    source.green * (1f - blurMix) + mean.green * blurMix,
+                    source.blue * (1f - blurMix) + mean.blue * blurMix
                 ) else source
                 tint.compositeOver(softened).luminance()
             }.toFloatArray()

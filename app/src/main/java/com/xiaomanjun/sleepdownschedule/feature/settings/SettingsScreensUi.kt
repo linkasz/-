@@ -508,9 +508,6 @@ fun AiImportSettingsSection(
     val visualConfig = settingsVisualConfig(state.config)
     if (showVoiceSettings) VoiceSettingsDialog(popupBackdrop, visualConfig,
         onDismiss = { showVoiceSettings = false })
-    if (showTodoSettings) TodoAiSettingsDialog(todoExtractor.readConfig(), popupBackdrop, visualConfig,
-        onDismiss = { showTodoSettings = false },
-        onSave = { todoExtractor.saveConfig(it); showTodoSettings = false })
     var saved by remember { mutableStateOf(AiImportSettingsStore.load(context)) }
     var selectedProviderId by remember(saved.profile.id) { mutableStateOf(saved.profile.id) }
     var customProviderName by remember(saved.profile.id) { mutableStateOf(saved.profile.displayName) }
@@ -538,16 +535,6 @@ fun AiImportSettingsSection(
     var showDeleteProviderConfirm by remember { mutableStateOf(false) }
     var providerMenuExpanded by remember { mutableStateOf(false) }
     var providerListRevision by remember { mutableIntStateOf(0) }
-    var modelUsesCustomInput by remember(saved.profile.id) {
-        mutableStateOf(AiProviderPresets.modelOptions(saved.profile.id).none { it.model == saved.profile.defaultModel })
-    }
-    var customModelInput by remember(saved.profile.id) {
-        mutableStateOf(
-            saved.profile.defaultModel.takeIf { savedModel ->
-                AiProviderPresets.modelOptions(saved.profile.id).none { it.model == savedModel }
-            }.orEmpty()
-        )
-    }
     val presets = remember(providerListRevision) { AiImportSettingsStore.selectableProfiles(context) }
     val selectedPreset = saved.profile.takeIf { it.id == selectedProviderId }
         ?: presets.firstOrNull { it.id == selectedProviderId }
@@ -576,24 +563,6 @@ fun AiImportSettingsSection(
         availableModels = configuredModelIds
     )
     val modelOptions = AiProviderPresets.modelOptions(modelProfile)
-    val modelEditable = (modelOptions.isEmpty() || modelUsesCustomInput)
-    val selectedModelOptionIndex = if (modelUsesCustomInput) {
-        modelOptions.size
-    } else {
-        modelOptions.indexOfFirst { it.model == model }.coerceAtLeast(0)
-    }
-    val onModelOptionSelected: (Int) -> Unit = { index ->
-        if (index >= modelOptions.size) {
-            modelUsesCustomInput = true
-            model = customModelInput
-        } else {
-            val selectedOption = modelOptions[index.coerceIn(modelOptions.indices)]
-            val nextModel = selectedOption.model
-            modelUsesCustomInput = false
-            model = nextModel
-            supportsVision = selectedOption.supportsImageInput
-        }
-    }
     val normalizedBaseUrl = normalizeAiBaseUrlForProvider(selectedProviderId, baseUrl)
     val usesOpenAICompatibleSite = selectedProviderId == AiProviderPresets.openAI.id &&
         !normalizedBaseUrl.equals("https://api.openai.com/v1", ignoreCase = true)
@@ -631,6 +600,10 @@ fun AiImportSettingsSection(
         reasoningEffort = effectiveReasoningEffort
     )
     val profile = editableProfile
+    if (showTodoSettings) TodoAiSettingsDialog(todoExtractor.readConfig(), popupBackdrop, visualConfig,
+        onDismiss = { showTodoSettings = false },
+        onSave = { todoExtractor.saveConfig(it); showTodoSettings = false },
+        mainSettings = AiImportSettings(profile, apiKeyInput.ifBlank { saved.apiKey }))
     fun hasCustomProviderDraft(apiKey: String): Boolean = customProviderDraftHasContent(
         name = customProviderName,
         baseUrl = baseUrl,
@@ -659,10 +632,6 @@ fun AiImportSettingsSection(
         supportsFileUpload = saved.profile.supportsFileUpload
         supportsPdfDirect = saved.profile.supportsPdfDirect
         testResult = null
-        val savedModelOptions = AiProviderPresets.modelOptions(saved.profile.id)
-        val savedUsesPresetModel = savedModelOptions.any { it.model == saved.profile.defaultModel }
-        modelUsesCustomInput = savedModelOptions.isEmpty() || !savedUsesPresetModel
-        customModelInput = if (savedUsesPresetModel) "" else saved.profile.defaultModel
     }
     fun selectProvider(providerId: String) {
         message = null
@@ -678,8 +647,6 @@ fun AiImportSettingsSection(
         }
         providerListRevision++
         val providerSettings = AiImportSettingsStore.loadProvider(context, providerId)
-        val providerModelOptions = AiProviderPresets.modelOptions(providerSettings.profile.id)
-        val providerUsesPresetModel = providerModelOptions.any { it.model == providerSettings.profile.defaultModel }
         saved = providerSettings
         selectedProviderId = providerSettings.profile.id
         customProviderName = providerSettings.profile.displayName
@@ -697,8 +664,6 @@ fun AiImportSettingsSection(
         supportsFileUpload = providerSettings.profile.supportsFileUpload
         supportsPdfDirect = providerSettings.profile.supportsPdfDirect
         testResult = null
-        modelUsesCustomInput = providerModelOptions.isEmpty() || !providerUsesPresetModel
-        customModelInput = if (providerUsesPresetModel) "" else providerSettings.profile.defaultModel
         providerMenuExpanded = false
     }
     fun addCustomProvider() {
@@ -725,8 +690,6 @@ fun AiImportSettingsSection(
         supportsFileUpload = newProfile.supportsFileUpload
         supportsPdfDirect = newProfile.supportsPdfDirect
         testResult = null
-        modelUsesCustomInput = true
-        customModelInput = newProfile.defaultModel
         providerMenuExpanded = false
         providerListRevision++
         message = "填写接口名称或连接信息后才会加入列表"
@@ -777,6 +740,18 @@ fun AiImportSettingsSection(
         }
     }
 
+    val discoveryKey = apiKeyInput.ifBlank { saved.apiKey }
+    val modelDiscovery = remember(selectedProviderId, normalizedBaseUrl, discoveryKey) { AiModelDiscoveryState() }
+    DisposableEffect(modelDiscovery) {
+        onDispose { modelDiscovery.request?.cancel() }
+    }
+    val addDiscoveredModels: (List<String>) -> Unit = { ids ->
+        availableModelsText = mergeAiModelIds(configuredModelIds, ids).joinToString("\n")
+        if (model.isBlank() && ids.isNotEmpty()) {
+            model = ids.first()
+        }
+    }
+
     val topPadding = detailContentTopPadding()
     SleepDownSecondaryPageList(
         contentTopPadding = topPadding,
@@ -788,7 +763,7 @@ fun AiImportSettingsSection(
                     SettingsNavigationRow("语音平台与模型", "实时转写、音色、朗读与连接检查",
                         onClick = { showVoiceSettings = true })
                     SettingsDivider()
-                    SettingsNavigationRow("待办 AI 提取", "文本和图片提取使用的服务、模型与 API Key",
+                    SettingsNavigationRow("待办 AI 提取", "默认跟随连接与模型，也可单独配置",
                         onClick = { showTodoSettings = true })
                 }
             }
@@ -798,7 +773,7 @@ fun AiImportSettingsSection(
                 SettingsGroup(backdrop = backdrop, config = state.config, modifier = Modifier.fillMaxWidth()) {
         SettingsInfoRow(
             "AI 设置",
-            "配置 AI 助理、AI 对话、教务课表解析共用的模型服务。语音和待办提取在本页分别配置。API Key 加密保存在本机，不会写入备份或诊断日志。主模型选择“无”时停用该模型调用，语音和提取配置仍可独立使用。"
+            "配置 AI 助理、AI 对话、教务课表解析共用的模型服务，待办提取默认跟随此连接。语音和独立提取可分别配置。API Key 加密保存在本机，不会写入备份或诊断日志。"
         )
         AiProviderPickerRow(
             value = if (isCustomProvider) customProviderDisplayName else selectedPreset.displayName,
@@ -834,50 +809,16 @@ fun AiImportSettingsSection(
                 placeholder = "自定义接口"
             )
             SettingsDivider()
-            AiCompatibleModelsEditor(
-                value = availableModelsText,
-                onValueChange = { next ->
-                    availableModelsText = next
-                    val ids = parseAiModelIdList(next, "")
-                    if (ids.isNotEmpty() && ids.none { it.equals(model, ignoreCase = true) }) {
-                        model = ids.first()
-                        modelUsesCustomInput = false
-                    }
-                }
-            )
-            SettingsDivider()
         }
         SettingsTextFieldRow("接口地址", baseUrl, { baseUrl = it }, KeyboardType.Uri)
         SettingsDivider()
-        SettingsTextFieldRow(
-            "模型",
-            model,
-            {
-                if (modelEditable) {
-                    model = it
-                    customModelInput = it
-                    modelUsesCustomInput = true
-                }
-            },
-            enabled = modelEditable
-        )
-        SettingsDivider()
-        if (modelOptions.isNotEmpty()) {
-            val modelLabels = modelOptions.map { it.label } + "自定义"
-            SleepDownLiquidDropdownPreference(
-                items = modelLabels,
-                selectedIndex = selectedModelOptionIndex,
-                title = "常用模型",
-                backdrop = backdrop,
-                config = state.config,
-                modifier = Modifier.fillMaxWidth(),
-                insideMargin = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
-                maxHeight = 318.dp,
-                onExpandedChange = {},
-                onSelectedIndexChange = onModelOptionSelected
-            )
-            SettingsDivider()
+        AiModelSelector("模型", model, modelOptions.map { it.model }, backdrop, state.config,
+            label = { id -> modelOptions.firstOrNull { it.model == id }?.label ?: id }) { id ->
+            availableModelsText = mergeAiModelIds(configuredModelIds, listOf(id)).joinToString("\n")
+            model = id
+            supportsVision = modelOptions.firstOrNull { it.model == id }?.supportsImageInput ?: supportsVision
         }
+        SettingsDivider()
         SettingsTextFieldRow(
             title = if (saved.apiKey.isBlank()) "API Key" else "API Key（已保存）",
             value = apiKeyInput,
@@ -886,6 +827,19 @@ fun AiImportSettingsSection(
             // affordances. Keep the key local and encrypted, but use the normal ASCII editor.
             keyboardType = KeyboardType.Ascii,
             moveCursorToEndOnFocus = true
+        )
+        SettingsDivider()
+        AiModelDiscoveryControl(
+            state = modelDiscovery,
+            scope = scope,
+            settings = AiImportSettings(profile, discoveryKey),
+            backdrop = backdrop,
+            config = state.config
+        )
+        SettingsDivider()
+        AiCompatibleModelsEditor(
+            value = availableModelsText,
+            onValueChange = { next -> availableModelsText = next }
         )
                 }
             }
@@ -1051,6 +1005,7 @@ fun AiImportSettingsSection(
             }
         }
     }
+    AiModelDiscoveryDialog(modelDiscovery, configuredModelIds, backdrop, state.config, addDiscoveredModels)
     if (showDeleteProviderConfirm) {
         LiquidAlertDialog(
             title = "删除自定义接口？",
@@ -1086,13 +1041,16 @@ private fun AiCompatibleModelsEditor(
     value: String,
     onValueChange: (String) -> Unit
 ) {
+    var expanded by remember { mutableStateOf(false) }
     Column(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Text("兼容站模型列表", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
+        SettingsActionButton(if (expanded) "收起模型管理" else "管理已添加模型", LocalSettingsPopupBackdrop.current,
+            onClick = { expanded = !expanded }, modifier = Modifier.fillMaxWidth())
+        if (expanded) {
         Text(
-            "每行一个模型 ID。右下角菜单会从这里读取，第一项作为新建接口的默认模型。",
+            "每行一个模型 ID，可手动补充。添加后可在常用模型和 AI 对话模型菜单中选择；当前使用的模型会保留。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -1111,6 +1069,7 @@ private fun AiCompatibleModelsEditor(
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             maxLines = 10
         )
+        }
     }
 }
 

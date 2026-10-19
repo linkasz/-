@@ -18,12 +18,27 @@ internal val LocalCourseTextBackground = compositionLocalOf<CourseTextBackground
 internal val LocalCourseTextMotionFrozen = compositionLocalOf { false }
 
 /** Local calendar ink uses hysteresis so small wallpaper changes cannot flicker polarity. */
-internal fun localMonochromeTextColor(samples: FloatArray, previous: Color, alpha: Float): Color {
+internal fun localMonochromeTextColor(samples: FloatArray, previous: Color, alpha: Float, minimumContrast: Float = 0f): Color {
     val levels = samples.filter { it.isFinite() }.map { it.coerceIn(0f, 1f) }.sorted()
     if (levels.isEmpty()) return previous.copy(alpha = alpha)
     val threshold = if (previous.luminance() > .5f) .22f else .16f
-    return (if (levels[levels.size / 2] < threshold) Color.White else Color.Black).copy(alpha = alpha)
+    val preferred = (if (levels[levels.size / 2] < threshold) Color.White else Color.Black).copy(alpha = alpha)
+    if (minimumContrast <= 0f) return preferred
+    fun contrast(ink: Color): Float {
+        val ratios = levels.map { background ->
+            val opaque = (maxOf(ink.luminance(), background) + .05f) / (minOf(ink.luminance(), background) + .05f)
+            1f + (opaque - 1f) * alpha.coerceIn(0f, 1f)
+        }.sorted()
+        return ratios[((ratios.size - 1) * .1f).toInt()]
+    }
+    val alternative = (if (preferred.luminance() > .5f) Color.Black else Color.White).copy(alpha = alpha)
+    return if (contrast(preferred) < minimumContrast && contrast(alternative) > contrast(preferred)) alternative else preferred
 }
+
+/** Match the sampled texture to the actual blur; a clear lens must not average its wallpaper. */
+internal fun courseTextBlurMix(blurred: Boolean, blurPx: Float, textHeightPx: Float): Float =
+    if (!blurred || !blurPx.isFinite() || !textHeightPx.isFinite() || textHeightPx <= 0f) 0f
+    else (blurPx.coerceAtLeast(0f) / textHeightPx * 2f).coerceIn(0f, .7f)
 
 /** Keep monochrome text polarity fixed; add a soft opposite-color shadow only where needed. */
 internal fun softTextShadowStrength(

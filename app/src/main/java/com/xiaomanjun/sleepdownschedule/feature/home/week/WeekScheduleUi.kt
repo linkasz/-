@@ -1251,7 +1251,7 @@ internal fun WeekCourseOverlayCardContent(course: CourseEntity, config: Schedule
                     fontSize = locationFont,
                     lineHeight = locationLineHeight,
                     fontWeight = FontWeight.Medium,
-                    color = textColor.copy(alpha = 0.78f),
+                    color = textColor,
                     maxLines = locationLines,
                     overflow = TextOverflow.Ellipsis,
                     textAlign = TextAlign.Center,
@@ -1284,7 +1284,7 @@ internal fun WeekCourseOverlayCardContent(course: CourseEntity, config: Schedule
                     fontSize = teacherFont,
                     lineHeight = teacherLineHeight,
                     fontWeight = FontWeight.Normal,
-                    color = textColor.copy(alpha = 0.58f),
+                    color = textColor,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     textAlign = TextAlign.Center,
@@ -3755,10 +3755,12 @@ fun WeekCourseBlock(
                         fontSize = locationFont,
                         lineHeight = locationLineHeight,
                         fontWeight = FontWeight.Medium,
-                        color = courseTextColor.copy(alpha = 0.78f),
+                        color = courseTextColor,
                         maxLines = locationLines,
                         overflow = TextOverflow.Ellipsis,
-                        textAlign = TextAlign.Center
+                        textAlign = TextAlign.Center,
+                        localMonochrome = themeColor == null,
+                        minimumContrast = 4.5f
                     )
                 }
                 CourseCardText(
@@ -3774,7 +3776,9 @@ fun WeekCourseBlock(
                     color = courseTextColor,
                     maxLines = nameLines,
                     overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Center
+                    textAlign = TextAlign.Center,
+                    localMonochrome = themeColor == null,
+                    minimumContrast = 4.5f
                 )
                 if (canShowTeacher) {
                     CourseCardText(
@@ -3786,10 +3790,12 @@ fun WeekCourseBlock(
                         fontSize = teacherFont,
                         lineHeight = teacherLineHeight,
                         fontWeight = FontWeight.Normal,
-                        color = courseTextColor.copy(alpha = 0.58f),
+                        color = courseTextColor,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        textAlign = TextAlign.Center
+                        textAlign = TextAlign.Center,
+                        localMonochrome = themeColor == null,
+                        minimumContrast = 4.5f
                     )
                 }
             }

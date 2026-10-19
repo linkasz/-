@@ -2846,13 +2846,27 @@ internal fun TodoAiSettingsDialog(
     backdrop: Backdrop?,
     config: ScheduleConfigEntity,
     onDismiss: () -> Unit,
-    onSave: (TodoAiConfig) -> Unit
+    onSave: (TodoAiConfig) -> Unit,
+    mainSettings: com.xiaomanjun.sleepdownschedule.feature.importing.AiImportSettings? = null
 ) {
+    val context = LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val main = mainSettings ?: remember(context) {
+        com.xiaomanjun.sleepdownschedule.feature.importing.AiImportSettingsStore.loadForRuntime(context)
+            ?: com.xiaomanjun.sleepdownschedule.feature.importing.AiImportSettingsStore.load(context)
+    }
+    var followMain by remember { mutableStateOf(initial.followMainConnection) }
     var url by remember { mutableStateOf(initial.apiUrl) }
     var key by remember { mutableStateOf(initial.apiKey) }
     var textModel by remember { mutableStateOf(initial.textModel) }
     var visionModel by remember { mutableStateOf(initial.visionModel) }
+    var models by remember { mutableStateOf(initial.availableModels) }
     var saveError by remember { mutableStateOf<String?>(null) }
+    val discovery = remember(url, key, followMain) { com.xiaomanjun.sleepdownschedule.feature.settings.AiModelDiscoveryState() }
+    androidx.compose.runtime.DisposableEffect(discovery) { onDispose { discovery.request?.cancel() } }
+    val choices = com.xiaomanjun.sleepdownschedule.feature.importing.mergeAiModelIds(models, listOf(textModel, visionModel))
+    val discoverySettings = com.xiaomanjun.sleepdownschedule.feature.importing.AiImportSettings(
+        com.xiaomanjun.sleepdownschedule.feature.importing.AiProviderPresets.custom.copy(baseUrl = url), key)
     com.xiaomanjun.sleepdownschedule.core.ui.designsystem.SleepDownFormDialog(onDismiss) {
         CenterLiquidDialog(backdrop = backdrop, config = config) {
             LiquidDialogHeader(
@@ -2862,7 +2876,8 @@ internal fun TodoAiSettingsDialog(
                 config = config,
                 onConfirm = {
                     try {
-                        onSave(TodoAiConfig(url, key, textModel, visionModel, initial.credentialError))
+                        onSave(initial.copy(apiUrl = url, apiKey = key, textModel = textModel, visionModel = visionModel,
+                            followMainConnection = followMain, availableModels = choices))
                     } catch (error: Exception) {
                         saveError = error.message ?: "保存失败，请检查配置后重试"
                     }
@@ -2874,17 +2889,37 @@ internal fun TodoAiSettingsDialog(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text("文本和图片只发送到你配置的模型服务。API Key 保存在本机。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                (saveError ?: initial.credentialError)?.let {
+                Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("跟随连接与模型", Modifier.weight(1f))
+                    com.xiaomanjun.sleepdownschedule.app.ui.LiquidControlToggle(followMain, { followMain = it; saveError = null }, backdrop)
+                }
+                (saveError ?: initial.credentialError.takeUnless { followMain })?.let {
                     Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                 }
+                if (followMain) {
+                    Text("${main.profile.displayName} · ${main.profile.defaultModel.ifBlank { "未选择模型" }}",
+                        style = MaterialTheme.typography.bodyMedium)
+                    Text("文字与图片默认使用下方“连接与模型”的当前模型；切换主模型后自动跟随。图片提取需要该模型支持图片输入。",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
                 DialogCapsuleField(url, { url = it }, "API URL", config, Modifier.fillMaxWidth())
                 DialogCapsuleField(key, { key = it }, "API Key", config, Modifier.fillMaxWidth(),
                     visualTransformation = PasswordVisualTransformation())
-                DialogCapsuleField(textModel, { textModel = it }, "文本模型", config, Modifier.fillMaxWidth())
-                DialogCapsuleField(visionModel, { visionModel = it }, "多模态模型", config, Modifier.fillMaxWidth())
+                com.xiaomanjun.sleepdownschedule.feature.settings.AiModelSelector("文本模型", textModel, choices, backdrop, config) {
+                    textModel = it; models = com.xiaomanjun.sleepdownschedule.feature.importing.mergeAiModelIds(choices, listOf(it))
+                }
+                com.xiaomanjun.sleepdownschedule.feature.settings.AiModelSelector("图片模型", visionModel, choices, backdrop, config) {
+                    visionModel = it; models = com.xiaomanjun.sleepdownschedule.feature.importing.mergeAiModelIds(choices, listOf(it))
+                }
+                com.xiaomanjun.sleepdownschedule.feature.settings.AiModelDiscoveryControl(discovery, scope,
+                    discoverySettings, backdrop, config)
+                }
             }
             Spacer(Modifier.height(12.dp))
         }
+    }
+    com.xiaomanjun.sleepdownschedule.feature.settings.AiModelDiscoveryDialog(discovery, choices, backdrop, config) {
+        models = com.xiaomanjun.sleepdownschedule.feature.importing.mergeAiModelIds(choices, it)
     }
 }
 

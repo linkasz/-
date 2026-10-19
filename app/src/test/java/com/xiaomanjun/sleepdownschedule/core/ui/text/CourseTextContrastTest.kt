@@ -108,4 +108,23 @@ class CourseTextContrastTest {
         assertTrue(softTextShadowStrength(FloatArray(20) { 0.01f }, 0f) > 0f)
         assertEquals(0f, softTextShadowStrength(FloatArray(20) { 0.9f }, 0f), 0f)
     }
+
+    @Test fun timetableInkOverridesCalendarHysteresisWhenContrastWouldBeLost() {
+        for (previous in listOf(Color.Black, Color.White)) {
+            for (level in 0..100) {
+                val background = level / 100f
+                val ink = localMonochromeTextColor(FloatArray(20) { background }, previous, 1f, minimumContrast = 4.5f)
+                assertTrue("Unreadable ink at $background from $previous", contrast(ink, background) >= 4.5f)
+                assertEquals(1f, ink.alpha, 0f)
+            }
+        }
+    }
+
+    @Test fun clearLensDoesNotPretendItsWallpaperWasBlurred() {
+        assertEquals(0f, courseTextBlurMix(true, 0f, 20f), 0f)
+        assertEquals(0f, courseTextBlurMix(false, 10f, 20f), 0f)
+        assertTrue(courseTextBlurMix(true, .1f, 20f) < .02f)
+        assertEquals(courseTextBlurMix(true, 4f, 20f), courseTextBlurMix(true, 8f, 40f), .0001f)
+        assertEquals(.7f, courseTextBlurMix(true, 30f, 20f), .0001f)
+    }
 }

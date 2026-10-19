@@ -44,6 +44,12 @@ import com.xiaomanjun.sleepdownschedule.glass.ui.GlassSurface
 import com.xiaomanjun.sleepdownschedule.glass.ui.AssistantGlassPalette
 import com.xiaomanjun.sleepdownschedule.glass.ui.rememberAssistantGlassPalette
 import com.xiaomanjun.sleepdownschedule.model.ScheduleConfigEntity
+import com.xiaomanjun.sleepdownschedule.feature.settings.AiModelSelector
+import com.xiaomanjun.sleepdownschedule.feature.settings.AiModelDiscoveryState
+import com.xiaomanjun.sleepdownschedule.feature.settings.AiModelDiscoveryControl
+import com.xiaomanjun.sleepdownschedule.feature.settings.AiModelDiscoveryDialog
+import com.xiaomanjun.sleepdownschedule.feature.importing.AiImportSettings
+import com.xiaomanjun.sleepdownschedule.feature.importing.mergeAiModelIds
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.map
@@ -104,6 +110,8 @@ internal fun VoiceSettingsDialog(backdrop: Backdrop?, config: ScheduleConfigEnti
     var checking by remember { mutableStateOf(false) }
     var feedback by remember { mutableStateOf<String?>(null) }
     var showVoicePicker by remember { mutableStateOf(false) }
+    val discovery = remember(draft.platform, draft.apiKey, draft.region, draft.workspace) { AiModelDiscoveryState() }
+    DisposableEffect(discovery) { onDispose { discovery.request?.cancel() } }
     SleepDownFormDialog(onDismiss) {
         CenterLiquidDialog(backdrop, config) {
             LiquidDialogHeader("语音平台", onDismiss, backdrop, config)
@@ -130,19 +138,11 @@ internal fun VoiceSettingsDialog(backdrop: Backdrop?, config: ScheduleConfigEnti
                 if (draft.platform == VoicePlatform.SILICON_FLOW) Text(
                     "连续语音：分段识别 → 当前文字助手 → 流式合成。下列为识别与合成组合，非原生双向实时模型。",
                     style = MaterialTheme.typography.bodySmall)
-                draft.platform.models.forEach { model ->
-                    GlassSurface(backdrop, config, Modifier.fillMaxWidth().heightIn(min = 48.dp), selected = draft.model == model,
-                        selectedSurfaceColorOverride = Color(0xFF168BFF), onClick = { if (!checking) {
-                            draft = draft.withModel(model); feedback = null
-                        } }) {
-                        Column(Modifier.padding(12.dp)) {
-                            Text(if (draft.platform == VoicePlatform.SILICON_FLOW) SiliconVoicePreset.resolve(model).label else model,
-                                color = if (draft.model == model) Color.White else LocalContentColor.current)
-                            if (draft.platform == VoicePlatform.SILICON_FLOW) Text(model,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (draft.model == model) Color.White.copy(alpha = .8f) else LocalContentColor.current.copy(alpha = .7f))
-                        }
-                    }
+                AiModelSelector("语音模型", draft.model, draft.modelOptions, backdrop, config, enabled = !checking,
+                    label = { if (draft.platform == VoicePlatform.SILICON_FLOW) SiliconVoicePreset.resolve(it).label else it }) { model ->
+                    require(isSupportedVoiceModel(draft.platform, model)) { "此模型不支持当前语音协议，请选择兼容的语音模型" }
+                    draft = draft.withModel(model).copy(availableModels = mergeAiModelIds(draft.modelOptions, listOf(model)))
+                    feedback = null
                 }
                 if (draft.platform == VoicePlatform.ALIYUN) {
                     AliyunTtsSettings(draft, !checking, backdrop, config) { draft = it }
@@ -165,6 +165,11 @@ internal fun VoiceSettingsDialog(backdrop: Backdrop?, config: ScheduleConfigEnti
                     }
                     DialogCapsuleField(draft.workspace, { draft = draft.copy(workspace = it) }, "百炼业务空间 ID", config,
                         modifier = Modifier.fillMaxWidth(), enabled = !checking)
+                }
+                if (draft.platform != VoicePlatform.SYSTEM) {
+                    AiModelDiscoveryControl(discovery, scope, AiImportSettings(voiceModelDiscoveryProfile(draft), draft.apiKey),
+                        backdrop, config, enabled = !checking, fetchModels = { discoverVoiceModels(draft) })
+                    Text("目录仅列出当前语音协议可接入的模型，实际权限需通过连接检查确认。", style = MaterialTheme.typography.bodySmall)
                 }
                 feedback?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
             }
@@ -194,6 +199,9 @@ internal fun VoiceSettingsDialog(backdrop: Backdrop?, config: ScheduleConfigEnti
                 }
             }
         }
+    }
+    AiModelDiscoveryDialog(discovery, draft.modelOptions, backdrop, config) { ids ->
+        draft = draft.copy(availableModels = mergeAiModelIds(draft.modelOptions, ids))
     }
 }
 

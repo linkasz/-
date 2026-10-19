@@ -4,6 +4,12 @@ import com.xiaomanjun.sleepdownschedule.ScheduleConfigEntity
 import com.xiaomanjun.sleepdownschedule.glass.*
 import com.xiaomanjun.sleepdownschedule.glass.ui.appUsesDarkTheme
 import com.xiaomanjun.sleepdownschedule.glass.ui.rememberGlassAppearance
+import com.xiaomanjun.sleepdownschedule.glass.ui.controlSurfaceFinish
+import com.xiaomanjun.sleepdownschedule.glass.ui.glassControlPressScale
+import com.xiaomanjun.sleepdownschedule.glass.ui.rememberGlassMotionEnabled
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.snap
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import com.xiaomanjun.sleepdownschedule.glass.ui.glassUsesLightStyle
@@ -654,6 +660,9 @@ internal fun QuickSheetLiquidAction(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
+    val motionEnabled = rememberGlassMotionEnabled()
+    val pressProgress by animateFloatAsState(if (pressed && enabled) 1f else 0f,
+        if (motionEnabled) spring(.6f, 380f) else snap(), label = "action-press-finish")
     val appearanceBinding = rememberGlassAppearance(config, frozen = pressed)
     val appearance = appearanceBinding.appearance
     val actionModifier = (if (modifier == Modifier) Modifier.width(84.dp) else modifier).then(appearanceBinding.modifier)
@@ -689,7 +698,8 @@ internal fun QuickSheetLiquidAction(
         LiquidButton(
             onClick = { if (enabled) onClick() },
             backdrop = backdrop,
-            modifier = actionModifier.alpha(if (enabled) 1f else .46f).semantics { if (!enabled) disabled() },
+            modifier = actionModifier.alpha(if (enabled) 1f else .46f).semantics { if (!enabled) disabled() }
+                .controlSurfaceFinish(Capsule(), !dark) { pressProgress },
             height = height,
             blurRadius = 2.dp,
             lensHeight = 12.dp,
@@ -728,11 +738,16 @@ internal fun QuickSheetLiquidAction(
         Box(
             modifier = actionModifier
                 .height(height)
+                .graphicsLayer {
+                    val scale = glassControlPressScale(height.value, pressProgress, motionEnabled)
+                    scaleX = scale; scaleY = scale
+                }
                 .clip(
                     Capsule()
                 )
                 .background(background.copy(alpha = if (enabled) 0.94f else 0.46f))
-                .clickable(enabled = enabled, onClick = onClick),
+                .controlSurfaceFinish(Capsule(), !dark) { pressProgress }
+                .clickable(interactionSource = interactionSource, indication = null, enabled = enabled, onClick = onClick),
             contentAlignment = Alignment.Center
         ) {
             Text(label, color = buttonTextColor, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)

@@ -52,7 +52,8 @@ internal fun CourseCardText(
     overflow: TextOverflow = TextOverflow.Clip,
     adaptiveContrast: Boolean = true,
     shadowLightText: Boolean? = null,
-    localMonochrome: Boolean = false
+    localMonochrome: Boolean = false,
+    minimumContrast: Float = 0f
 ) {
     val fallback = remember(themeColor, color) {
         themeColor?.let {
@@ -76,7 +77,9 @@ internal fun CourseCardText(
     // same polarity until it returns to the stationary timetable.
     val background = if (adaptiveContrast) LocalCourseTextBackground.current else null
     var target by remember(themeColor, fallback) { mutableStateOf(fallback) }
-    val foreground by animateColorAsState(target, tween(180), label = "course-text-lightness")
+    val animatedForeground by animateColorAsState(target, tween(180), label = "course-text-lightness")
+    // Do not fade black through low-contrast gray when a clear card needs the opposite ink.
+    val foreground = if (localMonochrome && minimumContrast > 0f) target else animatedForeground
     var targetShadowStrength by remember(themeColor, color) { mutableFloatStateOf(0f) }
     val shadowStrength by animateFloatAsState(targetShadowStrength, tween(160), label = "course-text-soft-shadow")
     val coordinates = remember { arrayOfNulls<LayoutCoordinates>(1) }
@@ -116,12 +119,12 @@ internal fun CourseCardText(
             samples.indices.all { abs(samples[it] - previousSamples[it]) < 0.012f }) return true
         lastSamples[0] = samples
         if (localMonochrome) {
-            // Calendar labels choose ink per local region; keep course-page polarity unchanged.
-            target = localMonochromeTextColor(samples, target, color.alpha)
+            // Clear timetable cards and calendar labels choose ink per local region.
+            target = localMonochromeTextColor(samples, target, color.alpha, minimumContrast)
             targetShadowStrength = softTextShadowStrength(samples, target.luminance(), color.alpha)
         } else if (themeColor != null) {
             target = courseTextColorForBackground(themeColor, samples, target)
-            targetShadowStrength = 0f
+            targetShadowStrength = softTextShadowStrength(samples, target.luminance(), target.alpha)
         } else {
             // Keep every ordinary label on the page's chosen black/white polarity. Only its
             // soft opposite-color shadow responds to the local glass underneath the glyphs.
@@ -157,13 +160,13 @@ internal fun CourseCardText(
         resolved[0] = updateForeground()
     }
     val density = LocalDensity.current
-    val lightText = shadowLightText ?: ((if (localMonochrome) foreground else color).luminance() >= 0.5f)
+    val lightText = shadowLightText ?: ((if (localMonochrome || themeColor != null) foreground else color).luminance() >= 0.5f)
     val effectiveFontSize = when {
         fontSize != TextUnit.Unspecified -> fontSize
         style.fontSize != TextUnit.Unspecified -> style.fontSize
         else -> 14.sp
     }
-    val shadowStyle = if (themeColor != null || shadowStrength <= 0.001f) style else {
+    val shadowStyle = if (shadowStrength <= 0.001f) style else {
         val radius = with(density) {
             (effectiveFontSize.toPx() * if (lightText) 0.28f else 0.36f)
                 .coerceIn(2.6.dp.toPx(), 6.2.dp.toPx())
