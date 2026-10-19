@@ -2552,7 +2552,7 @@ internal fun DayAgentConversationDialog(
                   ) {
                       AppGlassIconButton(agentInputBackdrop, state.config, "返回", { dismissAnimated() }, wallpaperAdaptive = true) {
                           androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.AutoMirrored.Rounded.ArrowBack,
-                              null, tint = foreground, modifier = Modifier.size(22.dp))
+                              null, modifier = Modifier.size(22.dp))
                       }
                       Text("AI 助理", color = foreground, fontWeight = FontWeight.SemiBold,
                           modifier = Modifier.weight(1f).padding(start = 12.dp))
@@ -2563,7 +2563,7 @@ internal fun DayAgentConversationDialog(
                                   com.xiaomanjun.sleepdownschedule.app.ui.SettingsPage.DayAgent.name))
                       }, wallpaperAdaptive = true) {
                           androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.Rounded.Settings,
-                              null, tint = foreground, modifier = Modifier.size(22.dp))
+                              null, modifier = Modifier.size(22.dp))
                       }
                   }
                   if (!homePresentation) Row(

@@ -1,6 +1,5 @@
 package com.xiaomanjun.sleepdownschedule.core.ui.designsystem
 
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -37,14 +36,12 @@ fun AppGlassIconButton(backdrop: Backdrop?, config: ScheduleConfigEntity, label:
         .then(appearanceBinding.modifier)
         .clickable(interactionSource = interaction, indication = null, enabled = enabled, onClick = onClick), contentAlignment = Alignment.Center) {
         androidx.compose.runtime.CompositionLocalProvider(LocalGlassAppearance provides appearance) {
-        GlassSurface(backdrop, config, Modifier.size(size)
-            .border(SleepDownDesignTokens.Button.BorderWidth,
-                foreground.copy(alpha = if (enabled) .3f else .12f), CircleShape),
+        GlassSurface(backdrop, config, Modifier.size(size),
             shape = CircleShape, tokens = GlassTokens.pill().copy(surfaceAlpha = appearance.controlAlpha,
                 blur = 2.dp * com.xiaomanjun.sleepdownschedule.model.normalizedHomeChromeBlurScale(config.homeChromeBlurScale)),
             baseSurfaceColorOverride = base, selected = selected,
             selectedSurfaceColorOverride = SleepDownDesignTokens.Button.Primary,
-            restingDecorations = true, interactionSource = interaction, enabled = enabled) {
+            interactionSource = interaction, enabled = enabled) {
             androidx.compose.runtime.CompositionLocalProvider(LocalContentColor provides foreground.copy(alpha = if (enabled) 1f else .4f)) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { content() }
             }

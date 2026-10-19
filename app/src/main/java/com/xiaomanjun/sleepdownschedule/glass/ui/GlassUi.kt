@@ -616,7 +616,7 @@ fun GlassSurface(
     val hasWallpaper = config.hasAnyWallpaper()
     val base = baseSurfaceColorOverride ?: if (readablePanel) {
         if (lightGlass) Color(0xFFF0F2F6) else Color(0xFF303238)
-    } else if (lightGlass) Color.White else Color(0xFF050505)
+    } else appearance.base
     val selectedColor = selectedSurfaceColorOverride ?: if (useGlass) {
         if (lightGlass) Color.Black.copy(alpha = 0.07f) else Color.White.copy(alpha = 0.08f)
     } else {

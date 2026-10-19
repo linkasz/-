@@ -46,8 +46,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.MutableFloatState
 import androidx.compose.runtime.State
@@ -61,6 +63,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
@@ -656,16 +660,20 @@ internal fun QuickSheetLiquidAction(
     destructive: Boolean = false,
     accented: Boolean = false,
     height: Dp = SleepDownDesignTokens.Button.MinimumTouchSize,
+    interactionSource: MutableInteractionSource? = null,
+    content: @Composable (() -> Unit)? = null,
     onClick: () -> Unit
 ) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val pressed by interactionSource.collectIsPressedAsState()
+    val ownInteractionSource = remember { MutableInteractionSource() }
+    val resolvedInteractionSource = interactionSource ?: ownInteractionSource
+    val pressed by resolvedInteractionSource.collectIsPressedAsState()
     val motionEnabled = rememberGlassMotionEnabled()
     val pressProgress by animateFloatAsState(if (pressed && enabled) 1f else 0f,
         if (motionEnabled) spring(.6f, 380f) else snap(), label = "action-press-finish")
     val appearanceBinding = rememberGlassAppearance(config, frozen = pressed)
     val appearance = appearanceBinding.appearance
     val actionModifier = (if (modifier == Modifier) Modifier.width(84.dp) else modifier).then(appearanceBinding.modifier)
+        .semantics { role = Role.Button; if (!enabled) disabled() }
     val centeredAction = height == SleepDownDesignTokens.CenteredDialog.ActionHeight
     // A nested action must not lens the text of the settings page through its modal surface.
     if (backdrop != null && !com.xiaomanjun.sleepdownschedule.glass.ui.LocalReadablePanelControls.current) {
@@ -698,7 +706,7 @@ internal fun QuickSheetLiquidAction(
         LiquidButton(
             onClick = { if (enabled) onClick() },
             backdrop = backdrop,
-            modifier = actionModifier.alpha(if (enabled) 1f else .46f).semantics { if (!enabled) disabled() }
+            modifier = actionModifier.semantics { if (!enabled) disabled() }
                 .controlSurfaceFinish(Capsule(), !dark) { pressProgress },
             height = height,
             blurRadius = 2.dp,
@@ -707,18 +715,20 @@ internal fun QuickSheetLiquidAction(
             tint = actionTint,
             surfaceColor = actionSurfaceColor,
             contentPadding = PaddingValues(horizontal = 14.dp),
-            isInteractive = true,
+            isInteractive = enabled,
             clickTargetEnabled = enabled,
-            interactionSource = interactionSource,
+            interactionSource = resolvedInteractionSource,
             staticPressDimAlpha = 0f,
             shape = Capsule(),
             shadowEnabled = true,
             highlightEnabled = enabled
         ) {
-            Text(label, color = actionTextColor, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+            CompositionLocalProvider(LocalContentColor provides actionTextColor.copy(alpha = if (enabled) 1f else .48f)) {
+                if (content != null) content() else Text(label, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+            }
         }
     } else {
-        val dark = appUsesDarkTheme(config)
+        val dark = !appearance.light
         val background = when {
             destructive && !centeredAction -> Color(0xFFFF453A)
             primary -> SleepDownDesignTokens.Button.Primary
@@ -733,7 +743,7 @@ internal fun QuickSheetLiquidAction(
             destructive && !centeredAction -> Color.White
             destructive -> Color(0xFFFF453A)
             accented -> SleepDownDesignTokens.Button.Primary
-            else -> MaterialTheme.colorScheme.onSurface
+            else -> appearance.foreground
         }
         Box(
             modifier = actionModifier
@@ -745,12 +755,14 @@ internal fun QuickSheetLiquidAction(
                 .clip(
                     Capsule()
                 )
-                .background(background.copy(alpha = if (enabled) 0.94f else 0.46f))
+                .background(background.copy(alpha = 0.94f))
                 .controlSurfaceFinish(Capsule(), !dark) { pressProgress }
-                .clickable(interactionSource = interactionSource, indication = null, enabled = enabled, onClick = onClick),
+                .clickable(interactionSource = resolvedInteractionSource, indication = null, enabled = enabled, onClick = onClick),
             contentAlignment = Alignment.Center
         ) {
-            Text(label, color = buttonTextColor, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+            CompositionLocalProvider(LocalContentColor provides buttonTextColor.copy(alpha = if (enabled) 1f else .48f)) {
+                if (content != null) content() else Text(label, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+            }
         }
     }
 }

@@ -5222,10 +5222,13 @@ internal fun HomeActionCapsuleVisual(
     onPersonalize: () -> Unit = {},
     onMore: () -> Unit = {}
 ) {
-    val adaptiveGlass = LocalAdaptiveGlass.current
-    val lightGlass = adaptiveGlass.lightGlass
     val personalizeInteraction = remember { MutableInteractionSource() }
     val moreInteraction = remember { MutableInteractionSource() }
+    val personalizePressed by personalizeInteraction.collectIsPressedAsState()
+    val morePressed by moreInteraction.collectIsPressedAsState()
+    val appearanceBinding = rememberGlassAppearance(config, frozen = personalizePressed || morePressed)
+    val appearance = appearanceBinding.appearance
+    val lightGlass = appearance.light
     val interactionModifier: (String, MutableInteractionSource, () -> Unit) -> Modifier =
         { description, interaction, action ->
         Modifier
@@ -5252,7 +5255,7 @@ internal fun HomeActionCapsuleVisual(
                     painterResource(R.drawable.ic_edit),
                     contentDescription = null,
                     modifier = Modifier.size(19.dp),
-                    tint = adaptiveGlass.contentColor
+                    tint = appearance.foreground
                 )
             }
             Box(
@@ -5264,16 +5267,18 @@ internal fun HomeActionCapsuleVisual(
                     painterResource(R.drawable.ic_more_horizontal),
                     contentDescription = null,
                     modifier = Modifier.size(21.dp),
-                    tint = adaptiveGlass.contentColor
+                    tint = appearance.foreground
                 )
             }
         }
     }
+    androidx.compose.runtime.CompositionLocalProvider(LocalGlassAppearance provides appearance) {
     if (backdrop != null) {
         LiquidButton(
             onClick = {},
             backdrop = backdrop,
-            modifier = modifier,
+            modifier = modifier.then(appearanceBinding.modifier)
+                .controlSurfaceFinish(Capsule(), lightGlass) { pressSnapshot?.progress ?: 0f },
             isInteractive = isInteractive,
             clickTargetEnabled = false,
             height = 42.dp,
@@ -5287,12 +5292,11 @@ internal fun HomeActionCapsuleVisual(
             pressExpansion = 3.dp,
             highlightRadiusMultiplier = 0.9f,
             pressSnapshot = pressSnapshot,
-            surfaceColor = (
-                if (lightGlass) HomeLightGlassSurfaceColor else ComposeColor(0xFF121212)
-                ).copy(alpha = homeChromeGlassSurfaceAlpha(lightGlass))
+            surfaceColor = appearance.base.copy(alpha = appearance.controlAlpha)
         ) { content() }
     } else {
-        GlassPill(backdrop = null, config = config, modifier = modifier) { content() }
+        GlassPill(backdrop = null, config = config, modifier = modifier.then(appearanceBinding.modifier)) { content() }
+    }
     }
 }
 
@@ -5356,19 +5360,27 @@ internal fun HomeIconButtonVisual(
     pressSnapshot: LiquidButtonPressSnapshot? = null,
     onClick: () -> Unit = {}
 ) {
-    val adaptiveGlass = LocalAdaptiveGlass.current
-    val lightGlass = adaptiveGlass.lightGlass
-    val baseSurfaceColor = if (lightGlass) HomeLightGlassSurfaceColor else ComposeColor(0xFF121212)
-    val buttonSurfaceColor = if (accentColor.isSpecified) {
-        accentColor.copy(alpha = if (lightGlass) HomeLightGlassAccentTintAlpha else 0.32f)
-    } else {
-        baseSurfaceColor.copy(alpha = homeChromeGlassSurfaceAlpha(lightGlass))
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val appearanceBinding = rememberGlassAppearance(config, frozen = pressed)
+    val appearance = appearanceBinding.appearance
+    val lightGlass = appearance.light
+    val buttonSurfaceColor = when {
+        selected -> (if (accentColor.isSpecified) accentColor else SleepDownDesignTokens.Button.Primary).copy(alpha = .94f)
+        accentColor.isSpecified -> accentColor.copy(alpha = appearance.controlAlpha)
+        else -> appearance.base.copy(alpha = appearance.controlAlpha)
     }
+    val foreground = if (selected) ComposeColor.White else appearance.foreground
+    androidx.compose.runtime.CompositionLocalProvider(LocalGlassAppearance provides appearance) {
     if (backdrop != null) {
         LiquidButton(
-            onClick = if (isInteractive) onClick else ({}),
+            onClick = onClick,
             backdrop = backdrop,
-            modifier = modifier,
+            modifier = modifier.then(appearanceBinding.modifier)
+                .controlSurfaceFinish(androidx.compose.foundation.shape.CircleShape, lightGlass) { pressSnapshot?.progress ?: 0f },
+            isInteractive = isInteractive,
+            clickTargetEnabled = isInteractive,
+            interactionSource = interaction,
             height = 42.dp,
             tint = if (accentColor.isSpecified) accentColor else ComposeColor.Unspecified,
             surfaceColor = buttonSurfaceColor,
@@ -5387,7 +5399,7 @@ internal fun HomeIconButtonVisual(
                     painterResource(iconRes),
                     contentDescription = contentDescription,
                     modifier = Modifier.size(20.dp),
-                    tint = adaptiveGlass.contentColor
+                    tint = foreground
                 )
             }
         }
@@ -5395,14 +5407,15 @@ internal fun HomeIconButtonVisual(
         GlassPill(
             backdrop = null,
             config = config,
-            modifier = modifier,
+            modifier = modifier.then(appearanceBinding.modifier),
             selected = selected,
-            onClick = if (isInteractive) onClick else ({})
+            onClick = if (isInteractive) onClick else null
         ) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Icon(painterResource(iconRes), contentDescription = contentDescription, modifier = Modifier.size(20.dp))
             }
         }
+    }
     }
 }
 

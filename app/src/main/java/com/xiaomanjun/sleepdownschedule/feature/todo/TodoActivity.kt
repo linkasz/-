@@ -170,6 +170,9 @@ import com.xiaomanjun.sleepdownschedule.core.ui.designsystem.DialogButtonRole
 import com.xiaomanjun.sleepdownschedule.core.ui.designsystem.DialogLiquidButton
 import com.xiaomanjun.sleepdownschedule.core.ui.designsystem.LiquidDialogHeader
 import com.xiaomanjun.sleepdownschedule.core.ui.designsystem.QuickSheetLiquidAction
+import com.xiaomanjun.sleepdownschedule.core.ui.designsystem.AdaptiveGlassActions
+import com.xiaomanjun.sleepdownschedule.core.ui.designsystem.GlassAction
+import com.xiaomanjun.sleepdownschedule.core.ui.designsystem.AppGlassIconButton
 import com.xiaomanjun.sleepdownschedule.core.ui.designsystem.SleepDownPickerDialog
 import com.xiaomanjun.sleepdownschedule.core.ui.designsystem.quickSheetBackdropModifier
 import com.xiaomanjun.sleepdownschedule.core.ui.designsystem.sleepDownGlassForegroundColor
@@ -1966,11 +1969,6 @@ private fun TodoSelectionPill(
         animationSpec = spring(dampingRatio = 0.72f, stiffness = 620f),
         label = "todo-filter-selection"
     )
-    val labelColor = lerp(
-        sleepDownGlassForegroundColor(config),
-        Color.White,
-        selectionProgress
-    )
     GlassPill(
         backdrop = backdrop,
         config = config,
@@ -1996,7 +1994,7 @@ private fun TodoSelectionPill(
                 text = label,
                 modifier = Modifier.padding(horizontal = 10.dp),
                 style = MaterialTheme.typography.labelLarge,
-                color = labelColor,
+                color = lerp(LocalContentColor.current, Color.White, selectionProgress),
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 maxLines = 1,
                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
@@ -2015,22 +2013,13 @@ private fun TodoGlassIconButton(
     destructive: Boolean = false,
     onClick: () -> Unit
 ) {
-    val haptics = LocalHapticFeedback.current
-    GlassPill(
-        backdrop = backdrop,
-        config = config,
-        modifier = modifier.size(48.dp).semantics { contentDescription = label },
-        onClick = onClick,
-        onLongClick = { haptics.performHapticFeedback(HapticFeedbackType.LongPress) }
-    ) {
-        Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                modifier = Modifier.size(20.dp),
-                tint = if (destructive) Color(0xFFE54D4D) else sleepDownGlassForegroundColor(config)
-            )
-        }
+    AppGlassIconButton(backdrop, config, label, onClick, modifier = modifier, size = 48.dp) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            modifier = Modifier.size(20.dp),
+            tint = if (destructive) Color(0xFFE54D4D) else LocalContentColor.current
+        )
     }
 }
 
@@ -2070,64 +2059,17 @@ private fun TodoGlassActionPill(
 }
 
 @Composable
-@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 private fun TodoDeleteActions(
     config: ScheduleConfigEntity, backdrop: Backdrop?, allSelected: Boolean,
     canSelect: Boolean, canDelete: Boolean, onSelect: () -> Unit, onCancel: () -> Unit, onDelete: () -> Unit
 ) {
-    val labels = listOf(if (allSelected) "取消全选" else "全选", "取消", "删除所选")
-    val icons = listOf(Icons.Default.TaskAlt, Icons.Default.Close, Icons.Default.DeleteOutline)
-    val enabled = listOf(canSelect, true, canDelete)
-    val actions = listOf(onSelect, onCancel, onDelete)
-    val style = MaterialTheme.typography.labelLarge
-    val measurer = androidx.compose.ui.text.rememberTextMeasurer()
-    val density = androidx.compose.ui.platform.LocalDensity.current
-    // Share the page's polarity; the assistant samples a different wallpaper region.
-    val light = com.xiaomanjun.sleepdownschedule.glass.ui.glassUsesLightStyle(config)
-    val pageForeground = sleepDownGlassForegroundColor(config)
-    val tokens = com.xiaomanjun.sleepdownschedule.core.ui.designsystem.SleepDownDesignTokens.Button
-    val material = GlassTokens.pill().copy(
-        blur = 4.dp, lensHeight = 12.dp, lensAmount = 24.dp,
-        surfaceAlpha = if (light) .52f else .56f,
-        highlightAlpha = .24f, shadowAlpha = .12f, innerShadowAlpha = .10f
+    AdaptiveGlassActions(
+        actions = listOf(
+            GlassAction(if (allSelected) "取消全选" else "全选", Icons.Default.TaskAlt, canSelect, onClick = onSelect),
+            GlassAction("取消", Icons.Default.Close, onClick = onCancel),
+            GlassAction("删除所选", Icons.Default.DeleteOutline, canDelete, destructive = canDelete, onClick = onDelete)
+        ), backdrop = backdrop, config = config
     )
-    BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val cell = (maxWidth - 16.dp) / 3
-        val iconOnly = labels.any { with(density) {
-            measurer.measure(androidx.compose.ui.text.AnnotatedString(it), style).size.width.toDp() + 24.dp > cell
-        } }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            labels.forEachIndexed { index, label ->
-                // Translucent adaptive tint reveals the lens; keep disabled text and outlines readable.
-                val destructive = index == 2 && enabled[index]
-                val foreground = if (destructive) Color(0xFFE54D4D)
-                    else pageForeground.copy(alpha = if (enabled[index]) 1f else .80f)
-                Box(Modifier.weight(1f)) {
-                    androidx.compose.material3.TooltipBox(
-                        positionProvider = androidx.compose.material3.TooltipDefaults.rememberPlainTooltipPositionProvider(),
-                        tooltip = { PlainTooltip { Text(label) } },
-                        state = androidx.compose.material3.rememberTooltipState()
-                    ) {
-                        GlassSurface(backdrop, config,
-                            modifier = Modifier.fillMaxWidth().height(tokens.ActionHeight)
-                                .border(tokens.BorderWidth, foreground.copy(alpha = .28f), Capsule())
-                                .semantics {
-                                    contentDescription = label; role = Role.Button
-                                    if (!enabled[index]) disabled()
-                                }, shape = Capsule(), tokens = material,
-                            restingDecorations = true,
-                            onClick = if (enabled[index]) actions[index] else null
-                        ) {
-                            Box(Modifier.fillMaxSize().padding(horizontal = 10.dp), contentAlignment = Alignment.Center) {
-                                if (iconOnly) Icon(icons[index], null, Modifier.size(tokens.IconSize), tint = foreground)
-                                else Text(label, color = foreground, style = style, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
 }
 
 @Composable
