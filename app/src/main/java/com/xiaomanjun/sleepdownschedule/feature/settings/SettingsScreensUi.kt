@@ -507,7 +507,7 @@ fun AiImportSettingsSection(
     val popupBackdrop = LocalSettingsPopupBackdrop.current ?: backdrop
     val visualConfig = settingsVisualConfig(state.config)
     if (showVoiceSettings) VoiceSettingsDialog(popupBackdrop, visualConfig,
-        onDismiss = { showVoiceSettings = false })
+        onDismiss = { showVoiceSettings = false }, show = showVoiceSettings)
     var saved by remember { mutableStateOf(AiImportSettingsStore.load(context)) }
     var selectedProviderId by remember(saved.profile.id) { mutableStateOf(saved.profile.id) }
     var customProviderName by remember(saved.profile.id) { mutableStateOf(saved.profile.displayName) }

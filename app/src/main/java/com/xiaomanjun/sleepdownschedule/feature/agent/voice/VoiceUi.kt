@@ -3,10 +3,8 @@ package com.xiaomanjun.sleepdownschedule.feature.agent.voice
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -20,19 +18,13 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import com.kyant.backdrop.Backdrop
-import com.xiaomanjun.sleepdownschedule.core.ui.designsystem.CenterLiquidDialog
-import com.xiaomanjun.sleepdownschedule.core.ui.designsystem.LiquidDialogHeader
 import com.xiaomanjun.sleepdownschedule.core.ui.designsystem.DialogCapsuleField
-import com.xiaomanjun.sleepdownschedule.core.ui.designsystem.QuickSheetLiquidAction
 import com.xiaomanjun.sleepdownschedule.core.ui.designsystem.AdaptiveGlassTabs
 import com.xiaomanjun.sleepdownschedule.core.ui.designsystem.GlassTab
 import com.xiaomanjun.sleepdownschedule.core.ui.designsystem.AdaptiveGlassActions
 import com.xiaomanjun.sleepdownschedule.core.ui.designsystem.GlassAction
 import com.xiaomanjun.sleepdownschedule.core.ui.designsystem.SleepDownPickerDialog
-import com.xiaomanjun.sleepdownschedule.core.ui.designsystem.SleepDownFormDialog
 import com.xiaomanjun.sleepdownschedule.app.ui.LiquidControlToggle
 import com.xiaomanjun.sleepdownschedule.glass.ui.GlassPill
 import androidx.compose.ui.semantics.semantics
@@ -102,7 +94,7 @@ internal fun VoiceInteractionStrip(session: VoiceSession, backdrop: Backdrop?, c
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-internal fun VoiceSettingsDialog(backdrop: Backdrop?, config: ScheduleConfigEntity, onDismiss: () -> Unit, onSaved: () -> Unit = {}) {
+internal fun VoiceSettingsDialog(backdrop: Backdrop?, config: ScheduleConfigEntity, onDismiss: () -> Unit, onSaved: () -> Unit = {}, show: Boolean = true) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var draft by remember { mutableStateOf(VoiceSettingsStore.load(context)) }
@@ -112,10 +104,29 @@ internal fun VoiceSettingsDialog(backdrop: Backdrop?, config: ScheduleConfigEnti
     var showVoicePicker by remember { mutableStateOf(false) }
     val discovery = remember(draft.platform, draft.apiKey, draft.region, draft.workspace) { AiModelDiscoveryState() }
     DisposableEffect(discovery) { onDispose { discovery.request?.cancel() } }
-    SleepDownFormDialog(onDismiss) {
-        CenterLiquidDialog(backdrop, config) {
-            LiquidDialogHeader("语音平台", onDismiss, backdrop, config)
-            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    SleepDownPickerDialog(
+        show = show, title = "语音平台与模型", onDismissRequest = onDismiss,
+        backdrop = backdrop, config = config, scrollableContent = true,
+        bottomActions = {
+            AdaptiveGlassActions(listOf(
+                GlassAction("取消", Icons.Default.Close, onClick = onDismiss),
+                GlassAction(if (checking) "检查中" else "连接检查", Icons.Default.Wifi, !checking) {
+                    checking = true; feedback = null
+                    scope.launch {
+                        try { feedback = checkVoiceConnection(draft) }
+                        catch (cancelled: CancellationException) { throw cancelled }
+                        catch (error: Exception) { feedback = error.message ?: "连接检查失败" }
+                        finally { checking = false }
+                    }
+                },
+                GlassAction("保存", Icons.Default.Check, !checking, true) {
+                    runCatching { VoiceSettingsStore.save(context, draft) }.onSuccess { onSaved(); onDismiss() }
+                        .onFailure { feedback = it.message ?: "保存失败" }
+                }
+            ), backdrop, config)
+        }
+    ) {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("百炼 Omni 实时模型直接回答并访问课程与日程；转写专用模型将文字交给已配置的 AI 助理。朗读使用最终显示的同一条回复。", style = MaterialTheme.typography.bodySmall)
                 Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
@@ -173,22 +184,6 @@ internal fun VoiceSettingsDialog(backdrop: Backdrop?, config: ScheduleConfigEnti
                 }
                 feedback?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
             }
-            AdaptiveGlassActions(listOf(
-                GlassAction(if (checking) "检查中" else "连接检查", Icons.Default.Wifi, !checking) {
-                    checking = true; feedback = null
-                    scope.launch {
-                        try { feedback = checkVoiceConnection(draft) }
-                        catch (cancelled: CancellationException) { throw cancelled }
-                        catch (error: Exception) { feedback = error.message ?: "连接检查失败" }
-                        finally { checking = false }
-                    }
-                },
-                GlassAction("保存", Icons.Default.Check, !checking, true) {
-                    runCatching { VoiceSettingsStore.save(context, draft) }.onSuccess { onSaved(); onDismiss() }
-                        .onFailure { feedback = it.message ?: "保存失败" }
-                }
-            ), backdrop, config, Modifier.padding(16.dp))
-        }
     }
     SleepDownPickerDialog(showVoicePicker, "选择合成音色", onDismissRequest = { showVoicePicker = false }, backdrop = backdrop, config = config,
         scrollableContent = true) {
