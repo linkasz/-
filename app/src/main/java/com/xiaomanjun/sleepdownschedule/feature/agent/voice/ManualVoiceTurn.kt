@@ -34,3 +34,28 @@ internal class ManualVoiceTurn(private val sampleRate: Int) {
         return Action(started = started)
     }
 }
+
+/** Bounded input pre-roll for interrupting playback without forwarding speaker echo. */
+internal class VoiceBargeInBuffer(
+    private val threshold: Float = .07f,
+    private val requiredVoicedFrames: Int = 3,
+    private val maxFrames: Int = 5
+) {
+    data class CapturedFrame(val pcm: ByteArray, val level: Float)
+    private val frames = ArrayDeque<CapturedFrame>()
+    private var voicedFrames = 0
+
+    @Synchronized fun reset() {
+        frames.clear()
+        voicedFrames = 0
+    }
+
+    /** Returns pre-roll once sustained speech crosses threshold; retained memory is frame-bounded. */
+    @Synchronized fun feed(frame: ByteArray, level: Float): List<CapturedFrame>? {
+        frames.addLast(CapturedFrame(frame.copyOf(), level))
+        while (frames.size > maxFrames) frames.removeFirst()
+        voicedFrames = if (level > threshold) voicedFrames + 1 else 0
+        if (voicedFrames < requiredVoicedFrames) return null
+        return frames.toList().also { reset() }
+    }
+}

@@ -4,10 +4,11 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.media.*
 import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.AudioEffect
+import android.media.audiofx.NoiseSuppressor
 import android.os.Handler
 import android.os.Looper
 import kotlinx.coroutines.*
-import kotlinx.coroutines.channels.Channel
 import kotlin.math.sqrt
 
 /** Owns only active-session hardware; never records or plays after release. */
@@ -15,17 +16,16 @@ internal class VoiceAudio(private val context: Context, private val scope: Corou
     private val manager = context.getSystemService(AudioManager::class.java)
     private var recorder: AudioRecord? = null
     private var echo: AcousticEchoCanceler? = null
+    private var noise: NoiseSuppressor? = null
+    @Volatile var echoCancellationActive = false; private set
     private var recordJob: Job? = null
     @Volatile private var recordCleanup: Job? = null
-    private var playJob: Job? = null
-    @Volatile private var track: AudioTrack? = null
-    private var queue = Channel<ByteArray>(64)
     private var focus: AudioFocusRequest? = null
-    @Volatile private var playbackGeneration = 0
-    val playbackToken get() = playbackGeneration
     @Volatile private var capturedGeneration = 0
-    @Volatile var playedBytes = 0L; private set
     private val attributes = assistantPlaybackAttributes()
+    private val playback = VoicePlayback(scope, ::createPlaybackSink)
+    val playbackToken get() = playback.playbackToken
+    val playedBytes get() = playback.playedBytes
 
     @SuppressLint("MissingPermission")
     suspend fun start(rate: Int, onFrame: (ByteArray, Float) -> Unit, onLostFocus: () -> Unit, onFailure: () -> Unit) {
@@ -39,8 +39,17 @@ internal class VoiceAudio(private val context: Context, private val scope: Corou
             AudioFormat.ENCODING_PCM_16BIT, maxOf(minimum * 2, rate / 5))
         recorder = recording
         check(recording.state == AudioRecord.STATE_INITIALIZED) { "麦克风不可用" }
-        if (AcousticEchoCanceler.isAvailable()) echo = AcousticEchoCanceler.create(recording.audioSessionId)?.apply { enabled = true }
+        echo = captureEffect("echo") {
+            if (AcousticEchoCanceler.isAvailable()) AcousticEchoCanceler.create(recording.audioSessionId) else null
+        }
+        noise = captureEffect("noise") {
+            if (NoiseSuppressor.isAvailable()) NoiseSuppressor.create(recording.audioSessionId) else null
+        }
+        echoCancellationActive = echo != null
+        val processor = VoiceCaptureProcessor(rate, platformNoiseSuppression = noise != null)
+        android.util.Log.i("ShixuAudio", "capture_start rate=$rate aec=${echo != null} ns=${noise != null}")
         recording.startRecording()
+        check(recording.recordingState == AudioRecord.RECORDSTATE_RECORDING) { "麦克风未开始录音" }
         val generation = ++capturedGeneration
         recordJob = scope.launch(Dispatchers.IO) {
             val buffer = ByteArray(rate / 25 * 2)
@@ -50,94 +59,60 @@ internal class VoiceAudio(private val context: Context, private val scope: Corou
                     if (count < 0) error("Microphone read failed")
                     if (count > 0 && capturedGeneration == generation) {
                         val frame = buffer.copyOf(count)
+                        processor.process(frame)
                         onFrame(frame, pcmLevel(frame))
                     }
                 }
             } catch (error: CancellationException) { throw error }
-            catch (_: Exception) { if (capturedGeneration == generation) withContext(Dispatchers.Main) { onFailure() } }
+            catch (error: Exception) {
+                android.util.Log.w("ShixuAudio", "capture_failure ${error.javaClass.simpleName}")
+                withContext(Dispatchers.Main) { if (capturedGeneration == generation) onFailure() }
+            }
         }
     }
 
     fun acquireFocus(onLostFocus: () -> Unit) {
-        val focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+        lateinit var focusRequest: AudioFocusRequest
+        focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
             .setAudioAttributes(attributes).setOnAudioFocusChangeListener({ change ->
-                if (change != AudioManager.AUDIOFOCUS_GAIN) onLostFocus()
+                if (focus === focusRequest && change != AudioManager.AUDIOFOCUS_GAIN) onLostFocus()
             }, Handler(Looper.getMainLooper())).build()
         check(manager.requestAudioFocus(focusRequest) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) { "无法获得音频焦点" }
         focus = focusRequest
     }
 
-    suspend fun play(pcm: ByteArray, onFailure: () -> Unit, expectedToken: Int = playbackGeneration) =
-        withContext(Dispatchers.Main.immediate) {
-            if (expectedToken != playbackGeneration) return@withContext
-            if (playJob?.isActive != true) {
-                queue = Channel(64)
-                val current = queue
-                val generation = playbackGeneration
-                playJob = scope.launch(Dispatchers.IO) {
-                    var output: AudioTrack? = null
-                    var outputBytes = 0L
-                    try {
-                        val minimum = AudioTrack.getMinBufferSize(24000, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
-                        check(minimum > 0) { "设备不支持语音播放采样率" }
-                        val owned = AudioTrack.Builder().setAudioAttributes(attributes)
-                            .setAudioFormat(AudioFormat.Builder().setSampleRate(24000).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).setEncoding(AudioFormat.ENCODING_PCM_16BIT).build())
-                            .setBufferSizeInBytes(maxOf(minimum, 9600)).setTransferMode(AudioTrack.MODE_STREAM).build()
-                        output = owned
-                        check(owned.state == AudioTrack.STATE_INITIALIZED) { "音频播放设备不可用" }
-                        manager.assistantSpeaker()?.let { speaker ->
-                            if (!owned.setPreferredDevice(speaker)) android.util.Log.w("ShixuAudio", "speaker_preference_rejected")
-                        }
-                        ensureActive()
-                        if (generation != playbackGeneration) return@launch
-                        track = owned
-                        owned.play()
-                        for (chunk in current) {
-                            if (generation != playbackGeneration) break
-                            var offset = 0
-                            while (offset < chunk.size && isActive && generation == playbackGeneration) {
-                                val written = owned.write(chunk, offset, chunk.size - offset, AudioTrack.WRITE_BLOCKING)
-                                check(written > 0) { "Audio output failed" }
-                                offset += written; outputBytes += written
-                                if (generation == playbackGeneration) playedBytes = outputBytes
-                            }
-                        }
-                        if (generation == playbackGeneration) withTimeoutOrNull(60_000) {
-                            while (isActive && owned.playbackHeadPosition.toLong() < outputBytes / 2) delay(30)
-                        }
-                    } catch (error: CancellationException) { throw error }
-                    catch (error: Exception) {
-                        android.util.Log.w("ShixuAudio", "playback_failure ${error.javaClass.simpleName}")
-                        if (generation == playbackGeneration) withContext(Dispatchers.Main) { onFailure() }
-                    } finally {
-                        runCatching { output?.stop() }; runCatching { output?.release() }
-                        if (track === output) track = null
-                    }
+    suspend fun play(pcm: ByteArray, onFailure: () -> Unit, expectedToken: Int = playbackToken) =
+        playback.play(pcm, onFailure, expectedToken)
+
+    suspend fun finishPlayback(expectedToken: Int = playbackToken) = playback.finishPlayback(expectedToken)
+
+    fun interrupt() = playback.interrupt()
+
+    private fun createPlaybackSink(): VoicePlaybackSink {
+        val minimum = AudioTrack.getMinBufferSize(24000, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
+        check(minimum > 0) { "设备不支持语音播放采样率" }
+        val output = AudioTrack.Builder().setAudioAttributes(attributes)
+            .setAudioFormat(AudioFormat.Builder().setSampleRate(24000).setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                .setEncoding(AudioFormat.ENCODING_PCM_16BIT).build())
+            .setBufferSizeInBytes(maxOf(minimum, 9600)).setTransferMode(AudioTrack.MODE_STREAM).build()
+        return object : VoicePlaybackSink {
+            override fun start() {
+                check(output.state == AudioTrack.STATE_INITIALIZED) { "音频播放设备不可用" }
+                manager.assistantSpeaker()?.let { speaker ->
+                    if (!output.setPreferredDevice(speaker)) android.util.Log.w("ShixuAudio", "speaker_preference_rejected")
                 }
+                output.play()
             }
-            val current = queue
-            try { current.send(pcm) }
-            catch (error: CancellationException) { throw error }
-            catch (error: kotlinx.coroutines.channels.ClosedSendChannelException) {
-                if (expectedToken == playbackGeneration) {
-                    android.util.Log.w("ShixuAudio", "playback_queue_closed")
-                    onFailure()
-                }
+            override fun write(bytes: ByteArray, offset: Int, length: Int): Int =
+                output.write(bytes, offset, length, AudioTrack.WRITE_NON_BLOCKING)
+            override val playbackHeadPositionSamples get() = output.playbackHeadPosition.toLong() and 0xffff_ffffL
+            override fun close() {
+                runCatching { output.pause() }
+                runCatching { output.flush() }
+                runCatching { output.stop() }
+                runCatching { output.release() }
             }
         }
-
-    suspend fun finishPlayback(expectedToken: Int = playbackGeneration) {
-        val job = withContext(Dispatchers.Main.immediate) {
-            if (expectedToken != playbackGeneration) return@withContext null
-            queue.close()
-            playJob
-        }
-        job?.join()
-    }
-
-    fun interrupt() {
-        playbackGeneration++; queue.close(); playJob?.cancel(); playJob = null
-        runCatching { track?.pause(); track?.flush() }; playedBytes = 0
     }
 
     fun release() {
@@ -145,20 +120,38 @@ internal class VoiceAudio(private val context: Context, private val scope: Corou
         val oldJob = recordJob
         val oldRecorder = recorder
         val oldEcho = echo
-        recordJob = null; recorder = null; echo = null
+        val oldNoise = noise
+        recordJob = null; recorder = null; echo = null; noise = null; echoCancellationActive = false
         oldJob?.cancel()
         runCatching { oldRecorder?.stop() }
-        if (oldJob != null || oldRecorder != null || oldEcho != null) {
+        if (oldJob != null || oldRecorder != null || oldEcho != null || oldNoise != null) {
             recordCleanup = releaseAfterVoiceJob(oldJob) {
-                runCatching { oldRecorder?.release() }
                 runCatching { oldEcho?.release() }.onFailure {
                     android.util.Log.w("ShixuAudio", "echo_release ${it.javaClass.simpleName}")
                 }
+                runCatching { oldNoise?.release() }.onFailure {
+                    android.util.Log.w("ShixuAudio", "noise_release ${it.javaClass.simpleName}")
+                }
+                runCatching { oldRecorder?.release() }
             }
         }
         interrupt()
         focus?.let { request -> runCatching { manager.abandonAudioFocusRequest(request) } }; focus = null
     }
+}
+
+/** Audio effects are optional vendor capabilities; a rejected effect must not tear down capture. */
+private fun <T : AudioEffect> captureEffect(name: String, create: () -> T?): T? {
+    var effect: T? = null
+    try {
+        effect = create() ?: return null
+        if (effect.setEnabled(true) == AudioEffect.SUCCESS && effect.enabled) return effect
+        android.util.Log.w("ShixuAudio", "${name}_unavailable")
+    } catch (error: Exception) {
+        android.util.Log.w("ShixuAudio", "${name}_unavailable ${error.javaClass.simpleName}")
+    }
+    runCatching { effect?.release() }
+    return null
 }
 
 /** Keep a blocking native read's resource alive until its owning coroutine has exited. */

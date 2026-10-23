@@ -62,12 +62,11 @@ internal class VoiceSession(
     private var responseActive = false
     private var nativeReplyRequested = false
     private var manualTurn: ManualVoiceTurn? = null
+    private val bargeInBuffer = VoiceBargeInBuffer()
     private var settings = VoiceSettings()
     private var recognizer: SpeechRecognizer? = null
     private var tts: TextToSpeech? = null
     private var ttsReady = false
-    @Volatile private var synthesisCall: Call? = null
-    @Volatile private var synthesisResponse: Response? = null
     private var ttsAnswer: String? = null
     private var ttsAnswerTurn: Long? = null
     private var lastReadback: String? = null
@@ -120,13 +119,15 @@ internal class VoiceSession(
         }
     }
 
-    private suspend fun connectNative(current: Long) {
+    private suspend fun connectNative(current: Long): Unit = coroutineScope {
         val adapter = RealtimeVoiceProtocol(settings); protocol = adapter
         val nativeContext = if (adapter.nativeAssistant) requireNotNull(nativeBridge).prepare(newSession = true) else null
         nativeInstructions = nativeContext?.instructions.orEmpty()
         val detector = if (adapter.manualInput) ManualVoiceTurn(adapter.inputRate) else null
         manualTurn = detector
         val events = Channel<VoiceEvent>(64)
+        val capturedInput = Channel<Pair<ByteArray, Float>>(64)
+        var inputJob: Job? = null
         websocket = voiceHttp.newWebSocket(Request.Builder().url(adapter.url)
             .apply { if (settings.platform == VoicePlatform.ALIYUN) header("OpenAI-Beta", "realtime=v1") }
             .header("Authorization", "Bearer ${settings.apiKey}").build(), object : WebSocketListener() {
@@ -156,17 +157,32 @@ internal class VoiceSession(
                 }
             }
             check(ready == true) { "实时语音连接超时，请检查网络、模型及地域" }
-            audio.start(adapter.inputRate, { frame, level ->
-                if (current == generation) {
-                    // A dedicated ASR session must not transcribe its own system TTS output.
-                    if (mutable.value.phase == VoicePhase.SPEAKING) return@start
-                    // During readback the microphone is muted to prevent self-transcription;
-                    // the visible interrupt button can immediately restore listening.
+            // Session state and manual-turn detection share Main with the WebSocket consumer.
+            inputJob = launch(Dispatchers.Main.immediate) {
+                for ((frame, level) in capturedInput) {
+                    if (current != generation) continue
+                    if (mutable.value.phase == VoicePhase.SPEAKING) {
+                        if (!(adapter.nativeAssistant || adapter.transcriptionOnly) || !audio.echoCancellationActive) continue
+                        val onset = bargeInBuffer.feed(frame, level) ?: continue
+                        interrupt()
+                        if (adapter.manualInput) {
+                            check(events.trySend(VoiceEvent.SpeechStarted).isSuccess) { "语音处理积压，请重新开启" }
+                        }
+                        val socket = websocket
+                        if (socket == null || onset.any { captured ->
+                                !socket.send(adapter.append(Base64.encodeToString(captured.pcm, Base64.NO_WRAP)))
+                            }) {
+                            stop("语音打断失败，请重试")
+                            continue
+                        }
+                        onset.forEach { captured -> detector?.feed(captured.level, captured.pcm.size) }
+                        continue
+                    }
                     mutable.update { if (it.phase == VoicePhase.SPEAKING) it else it.copy(level = level) }
                     val socket = websocket
                     if (socket != null && (socket.queueSize() > 512_000 || !socket.send(adapter.append(Base64.encodeToString(frame, Base64.NO_WRAP))))) {
-                        scope.launch { if (current == generation) stop("语音网络发送受阻") }
-                        return@start
+                        stop("语音网络发送受阻")
+                        continue
                     }
                     // Commit a real voiced segment; context is refreshed before response.create.
                     detector?.feed(level, frame.size)?.let { action ->
@@ -178,6 +194,11 @@ internal class VoiceSession(
                                 scope.launch { if (current == generation) stop("语音提交失败，请重试") }
                         }
                     }
+                }
+            }
+            audio.start(adapter.inputRate, { frame, level ->
+                if (current == generation && !capturedInput.trySend(frame to level).isSuccess) {
+                    launch { if (current == generation) stop("语音处理积压，请重新开启") }
                 }
             }, { if (current == generation) stop("音频焦点已转移，语音已停止") }, { if (current == generation) stop("麦克风不可用") })
             mutable.value = mutable.value.copy(phase = VoicePhase.LISTENING)
@@ -215,7 +236,7 @@ internal class VoiceSession(
                     VoiceEvent.AudioDone -> if (mutable.value.phase == VoicePhase.SPEAKING) {
                         val turn = turnGeneration
                         val token = audio.playbackToken
-                        scope.launch { audio.finishPlayback(token); completeSpeech(current, turn) }
+                        finishPlayback(current, turn, token)
                     }
                     is VoiceEvent.TextDelta -> if (acceptNativeEvent(event.responseId)) nativeText.append(event.text)
                     is VoiceEvent.TextDone -> if (acceptNativeEvent(event.responseId) && event.text.isNotBlank()) {
@@ -284,7 +305,7 @@ internal class VoiceSession(
                         if (nativeReplyRequested && mutable.value.phase == VoicePhase.SPEAKING) {
                             val turn = turnGeneration
                             val token = audio.playbackToken
-                            scope.launch { audio.finishPlayback(token); completeSpeech(current, turn) }
+                            finishPlayback(current, turn, token)
                         }
                         nativeReplyRequested = false
                     }
@@ -296,7 +317,7 @@ internal class VoiceSession(
                 }
             }
             if (current == generation) stop("实时语音连接已结束")
-        } finally { events.close() }
+        } finally { capturedInput.close(); inputJob?.cancel(); events.close() }
     }
 
     private fun processSegment(frame: ByteArray, level: Float) {
@@ -347,7 +368,7 @@ internal class VoiceSession(
 
     private fun submitFinal(question: String, callId: String? = null) {
         cancelReplyTrace()
-        turnJob?.cancel(); synthesisCall?.cancel(); synthesisResponse?.close()
+        turnJob?.cancel()
         audio.interrupt(); runCatching { tts?.stop() }; ttsAnswer = null; ttsAnswerTurn = null; cancelNativeResponse()
         turnJob = scope.launch {
             try { answer(question, callId) }
@@ -392,6 +413,7 @@ internal class VoiceSession(
 
     private suspend fun speakReply(reply: String, current: Long, turn: Long, callId: String? = null) {
         lastReadback = reply
+        bargeInBuffer.reset()
         mutable.value = mutable.value.copy(phase = VoicePhase.SPEAKING, error = null, canRetryReadback = false)
         try {
         // The system recognizer must not turn our own readback into a second user request.
@@ -424,7 +446,7 @@ internal class VoiceSession(
     }
 
     private fun readbackFailed() {
-        synthesisCall?.cancel(); runCatching { synthesisResponse?.close() }; synthesisCall = null; synthesisResponse = null
+        turnJob?.cancel(); turnJob = null
         audio.interrupt(); runCatching { tts?.stop() }; ttsAnswer = null; ttsAnswerTurn = null
         mutable.value = mutable.value.copy(phase = VoicePhase.LISTENING, level = 0f,
             error = if (lastReadback != null) "回复已显示，朗读失败。点击此处或语音按钮重试朗读。" else "系统朗读暂时不可用，可继续语音或文字输入。",
@@ -461,9 +483,7 @@ internal class VoiceSession(
         val body = siliconSpeechPayload(settings, text).toString().toRequestBody("application/json".toMediaType())
         val call = voiceHttp.newCall(Request.Builder().url("https://api.siliconflow.cn/v1/audio/speech")
             .header("Authorization", "Bearer ${settings.apiKey}").post(body).build())
-        synthesisCall = call
-        try { call.awaitVoice().use { response ->
-            synthesisResponse = response
+        call.useVoiceResponse { response ->
             check(response.isSuccessful) { "语音合成失败（${response.code}）" }
             val source = requireNotNull(response.body).source()
             val buffer = okio.Buffer()
@@ -471,23 +491,21 @@ internal class VoiceSession(
                 val read = source.read(buffer, 4096)
                 if (read < 0) break
                 val pcm = buffer.readByteArray()
-                if (current != generation || turn != turnGeneration) return@withContext
+                if (current != generation || turn != turnGeneration) return@useVoiceResponse
                 mutable.update { it.copy(level = pcmLevel(pcm)) }
                 audio.play(pcm, { if (current == generation && turn == turnGeneration) readbackFailed() }, token)
             }
-        } } finally { if (synthesisCall === call) { synthesisCall = null; synthesisResponse = null } }
+        }
     }
 
     private suspend fun synthesizeAliyun(text: String) {
         val current = generation; val turn = turnGeneration; val token = audio.playbackToken
-        try {
-            AliyunTtsClient.stream(settings, text, { synthesisCall = it }, { synthesisResponse = it }) { pcm ->
-                if (current == generation && turn == turnGeneration) {
-                    mutable.update { it.copy(level = pcmLevel(pcm)) }
-                    audio.play(pcm, { if (current == generation && turn == turnGeneration) readbackFailed() }, token)
-                }
+        AliyunTtsClient.stream(settings, text) { pcm ->
+            if (current == generation && turn == turnGeneration) {
+                mutable.update { it.copy(level = pcmLevel(pcm)) }
+                audio.play(pcm, { if (current == generation && turn == turnGeneration) readbackFailed() }, token)
             }
-        } finally { if (current == generation && turn == turnGeneration) { synthesisCall = null; synthesisResponse = null } }
+        }
     }
 
     private fun startSystem() {
@@ -604,6 +622,19 @@ internal class VoiceSession(
     }
 
     private fun resetSegment() { listeningFrameBytes.reset(); voicedFrames = 0; quietFrames = 0; preRoll.clear() }
+    private fun finishPlayback(current: Long, turn: Long, token: Int) {
+        scope.launch {
+            try {
+                audio.finishPlayback(token)
+                completeSpeech(current, turn)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                if (current == generation && turn == turnGeneration) readbackFailed()
+            }
+        }
+    }
+
     private fun completeSpeech(current: Long, turn: Long) {
         if (current != generation || turn != turnGeneration || mutable.value.phase != VoicePhase.SPEAKING) return
         replyTraceId?.let { Log.i("ShixuVoice", "traceId=$it reply_end channel=tts") }
@@ -625,12 +656,12 @@ internal class VoiceSession(
         if (!mutable.value.active) return
         cancelReplyTrace()
         finalWait?.cancel(); finalWait = null; pendingFinal = null
-        synthesisCall?.cancel(); runCatching { synthesisResponse?.close() }
         val abandoned = turnGeneration
         turnGeneration++; turnJob?.cancel(); turnJob = null
-        nativeBridge?.let { scope.launch(NonCancellable) { it.abandon(abandoned) } }
+        abandonTurn(abandoned)
         cancelNativeResponse()
-        protocol?.takeUnless { it.transcriptionOnly }?.let { websocket?.send(it.clear()) }; manualTurn?.reset()
+        protocol?.takeUnless { it.transcriptionOnly }?.let { websocket?.send(it.clear()) }
+        manualTurn?.reset(); bargeInBuffer.reset()
         audio.interrupt(); runCatching { tts?.stop() }; ttsAnswer = null; ttsAnswerTurn = null; resetSegment()
         mutable.value = mutable.value.copy(phase = VoicePhase.LISTENING, level = 0f)
         if (settings.platform == VoicePlatform.SYSTEM) {
@@ -644,21 +675,30 @@ internal class VoiceSession(
         cancelReplyTrace()
         finalWait?.cancel(); finalWait = null; pendingFinal = null; finalDeduplicator.clear()
         transcriptWait?.cancel(); transcriptWait = null; submittedItems.clear()
-        synthesisCall?.cancel(); runCatching { synthesisResponse?.close() }; synthesisCall = null; synthesisResponse = null
         val abandoned = turnGeneration
         generation++; turnGeneration++; turnJob?.cancel(); sessionJob?.cancel(); turnJob = null; sessionJob = null
-        nativeBridge?.let { scope.launch(NonCancellable) { it.abandon(abandoned) } }
+        abandonTurn(abandoned)
         cancelNativeResponse(); websocket?.close(1000, "closed"); websocket?.cancel(); websocket = null; protocol = null
         manualTurn?.reset(); manualTurn = null
         nativeResponses.reset(); nativeTools.clear(); nativeText.setLength(0); nativeInstructions = ""
         audio.release(); runCatching { recognizer?.destroy() }; recognizer = null
         runCatching { tts?.stop() }; runCatching { tts?.shutdown() }; tts = null; ttsReady = false; ttsAnswer = null; ttsAnswerTurn = null
         resetSegment(); seenInput = false
+        bargeInBuffer.reset()
         mutable.value = VoiceSessionState(if (error == null) VoicePhase.OFF else VoicePhase.ERROR, error = error)
         lastReadback = null
     }
 
     private fun acceptNativeEvent(responseId: String): Boolean = nativeResponses.accepts(responseId, turnGeneration)
+
+    private fun abandonTurn(turn: Long) {
+        val bridge = nativeBridge ?: return
+        scope.launch(NonCancellable) {
+            try { bridge.abandon(turn) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) { Log.w("ShixuVoice", "abandon_failure type=${error.javaClass.simpleName}") }
+        }
+    }
 
     fun pauseForBackground() {
         if (pausedSettings != null && !mutable.value.active) return

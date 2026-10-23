@@ -14,8 +14,7 @@ internal fun aliyunHttpBase(settings: VoiceSettings): String =
 /** HTTP TTS cannot rewrite the answer: every request receives only a fragment of the UI message. */
 internal object AliyunTtsClient {
     private val client = OkHttpClient.Builder().readTimeout(60, TimeUnit.SECONDS).build()
-    suspend fun stream(settings: VoiceSettings, text: String, onCall: (Call) -> Unit,
-        onResponse: (Response) -> Unit, onPcm: suspend (ByteArray) -> Unit) = withContext(Dispatchers.IO) {
+    suspend fun stream(settings: VoiceSettings, text: String, onPcm: suspend (ByteArray) -> Unit) = withContext(Dispatchers.IO) {
         require(text.isNotBlank()) { "没有可朗读的内容" }
         // Split by Unicode code point to respect API limits without breaking a character.
         val points = text.codePoints().toArray()
@@ -28,9 +27,7 @@ internal object AliyunTtsClient {
             }.toString().toRequestBody("application/json".toMediaType())
             val call = client.newCall(Request.Builder().url(aliyunHttpBase(settings) + "/services/aigc/multimodal-generation/generation")
                 .header("Authorization", "Bearer ${settings.apiKey}").header("X-DashScope-SSE", "enable").post(body).build())
-            onCall(call)
-            call.awaitVoice().use { response ->
-                onResponse(response)
+            call.useVoiceResponse { response ->
                 check(response.isSuccessful) { "百炼朗读请求失败（${response.code}），请核对地域和音色权限" }
                 val source = requireNotNull(response.body).source()
                 var received = false
