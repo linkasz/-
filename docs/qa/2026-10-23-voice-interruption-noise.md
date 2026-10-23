@@ -46,6 +46,8 @@ APK SHA-256：`e09c7dc0c47a5acfc13a3c7461e1fd4f70e416475582a27782b9b1d8f88228ac`
 
 本地验证日志及摘要：`tmp/20261023-voice-asr-final-build.log`、`tmp/20261023-voice-asr-test-results.json`、`tmp/20261023-voice-asr-source-freeze.json`、`tmp/20261024-voice-apk-summary.json`。这些临时材料与 APK 不提交到公开仓库。
 
-GitHub 同步目标为既有分支 `codex/ai-model-discovery-20261018`，范围仅限本轮语音源码、测试和本报告；实际远端更新结果以推送回执及本轮交付回复为准。
+GitHub：源码与测试提交 `72ba9ef` 已推送到既有分支 `codex/ai-model-discovery-20261018`。现有代理下 Schannel、OpenSSL 与代理端 DNS 路线均在 TLS 握手阶段失败；仅对本次命令禁用代理后直连推送成功，没有关闭证书校验，也没有修改全局代理或 Git 配置。随后补记本报告的交付结果。
+
+已核对并关闭本轮创建的 Gradle daemon，确认进程退出和监听端口释放；清理结果保存在 `tmp/20261024-voice-service-cleanup.json`，没有关闭用户原有服务或共享基础服务。
 
 本地候选保留本地真实人格资源，不作为已脱敏的公开 APK 上传。提交仅包含本轮语音源码、测试和本报告；工作树中原有私有资源、版本配置、声明文档及其他改动保持原处。无清库、卸载、reset、历史重写、标签、合并或 Release，也不修改宣传视频工程。
